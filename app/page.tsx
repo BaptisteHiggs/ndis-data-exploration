@@ -1,43 +1,58 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useDatabase } from "@/hooks/useDatabase";
+import Link from "next/link";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import ErrorDisplay from "@/components/ErrorDisplay";
-import TableList from "@/components/TableList";
-import TableView from "@/components/TableView";
+import Dashboard from "@/components/Dashboard";
 
 export default function Home() {
   const router = useRouter();
-  const {
-    status,
-    errorMessage,
-    tables,
-    selectedTable,
-    tableData,
-    loadingData,
-    initializeConnection,
-    selectTable,
-  } = useDatabase();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>("");
+  const [data, setData] = useState<any[]>([]);
 
   useEffect(() => {
-    const password = sessionStorage.getItem("APP_PASSWORD");
+    const fetchDashboardData = async () => {
+      const password = sessionStorage.getItem("APP_PASSWORD");
 
-    if (!password) {
-      router.push("/setup");
-      return;
-    }
-
-    // Initialize connection and fetch tables
-    initializeConnection(password).then((success) => {
-      if (!success) {
-        // If authentication failed, clear session and redirect
-        sessionStorage.clear();
-        setTimeout(() => router.push("/setup"), 2000);
+      if (!password) {
+        router.push("/setup");
+        return;
       }
-    });
-  }, [router, initializeConnection]);
+
+      try {
+        setLoading(true);
+        const response = await fetch("/api/dashboard-data", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ password }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            sessionStorage.clear();
+            router.push("/setup");
+            return;
+          }
+          setError(result.error || "Failed to load dashboard data");
+        } else {
+          setData(result.data || []);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error occurred");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [router]);
 
   const handleLogout = () => {
     sessionStorage.clear();
@@ -51,45 +66,37 @@ export default function Home() {
         <header className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6 mb-4">
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-              Database Explorer
+              NDIS Data Dashboard
             </h1>
-            <button
-              onClick={handleLogout}
-              className="px-4 py-2 border border-zinc-300 dark:border-zinc-700 text-black dark:text-zinc-50 rounded-md font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-sm"
-            >
-              Logout
-            </button>
+            <div className="flex gap-3">
+              <Link
+                href="/table"
+                className="px-4 py-2 bg-black dark:bg-zinc-50 text-white dark:text-black rounded-md font-medium hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors text-sm"
+              >
+                View Tables
+              </Link>
+              <button
+                onClick={handleLogout}
+                className="px-4 py-2 border border-zinc-300 dark:border-zinc-700 text-black dark:text-zinc-50 rounded-md font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors text-sm"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </header>
 
         {/* Loading State */}
-        {status === "loading" && (
+        {loading && (
           <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-8">
             <LoadingSpinner />
           </div>
         )}
 
         {/* Error State */}
-        {status === "error" && <ErrorDisplay message={errorMessage} />}
+        {error && !loading && <ErrorDisplay message={error} />}
 
-        {/* Connected State - Show Tables */}
-        {status === "connected" && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-            {/* Sidebar - Table List */}
-            <aside className="lg:col-span-1">
-              <TableList
-                tables={tables}
-                selectedTable={selectedTable}
-                onTableSelect={selectTable}
-              />
-            </aside>
-
-            {/* Main Content - Table Data */}
-            <main className="lg:col-span-3">
-              <TableView tableData={tableData} loading={loadingData} />
-            </main>
-          </div>
-        )}
+        {/* Dashboard */}
+        {!loading && !error && <Dashboard data={data} />}
       </div>
     </div>
   );

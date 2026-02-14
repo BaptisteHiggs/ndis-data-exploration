@@ -1,5 +1,6 @@
 import type { TableData } from "@/types/database";
 import LoadingSpinner from "./LoadingSpinner";
+import DownloadCSVButton from "./DownloadCSVButton";
 
 interface TableViewProps {
   tableData: TableData | null;
@@ -29,13 +30,19 @@ export default function TableView({ tableData, loading }: TableViewProps) {
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6">
-      <div className="mb-4">
-        <h2 className="text-xl font-semibold text-black dark:text-zinc-50">
-          {tableData.tableName}
-        </h2>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          {tableData.rowCount} rows, {tableData.columns.length} columns
-        </p>
+      <div className="mb-4 flex justify-between items-start">
+        <div>
+          <h2 className="text-xl font-semibold text-black dark:text-zinc-50">
+            {tableData.tableName}
+          </h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            {tableData.rowCount} rows, {tableData.columns.length} columns
+          </p>
+        </div>
+        <DownloadCSVButton
+          data={tableData.data}
+          filename={tableData.tableName}
+        />
       </div>
 
       {tableData.data.length === 0 ? (

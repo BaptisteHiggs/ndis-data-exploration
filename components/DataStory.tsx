@@ -61,13 +61,13 @@ export default function DataStory({ data, tables }: DataStoryProps) {
 
     const dateCol = Object.keys(data[0]).find(
       (col) =>
-        col.toLowerCase().includes("date") ||
-        col.toLowerCase().includes("created")
+        col.toLowerCase().includes("invoice_date")
     );
 
     if (!dateCol) return [];
 
     const monthCounts: Record<string, number> = {};
+    console.log("DATA:", data)
     data.forEach((row) => {
       if (row[dateCol]) {
         const date = new Date(row[dateCol]);
@@ -79,7 +79,6 @@ export default function DataStory({ data, tables }: DataStoryProps) {
     return Object.entries(monthCounts)
       .map(([month, count]) => ({ month, count }))
       .sort((a, b) => a.month.localeCompare(b.month))
-      .slice(-12); // Last 12 months
   }, [data]);
 
   // Distribution of invoices per customer
@@ -137,7 +136,8 @@ export default function DataStory({ data, tables }: DataStoryProps) {
     data.forEach((row) => {
       const value = row[valueCol] || 0;
       let bucket = "";
-      if (value < 1000) bucket = "<$1k";
+      if (value < 300) bucket = "$0-$300";
+      else if (value < 1000) bucket = "$300-$1k";
       else if (value < 5000) bucket = "$1k-$5k";
       else if (value < 10000) bucket = "$5k-$10k";
       else if (value < 20000) bucket = "$10k-$20k";
@@ -146,7 +146,7 @@ export default function DataStory({ data, tables }: DataStoryProps) {
       distribution[bucket] = (distribution[bucket] || 0) + 1;
     });
 
-    const order = ["<$1k", "$1k-$5k", "$5k-$10k", "$10k-$20k", "$20k+"];
+    const order = ["$0-$300", "$300-$1k", "$1k-$5k", "$5k-$10k", "$10k-$20k", "$20k+"];
     return order
       .filter((bucket) => distribution[bucket])
       .map((bucket) => ({ bucket, count: distribution[bucket] }));
@@ -157,15 +157,15 @@ export default function DataStory({ data, tables }: DataStoryProps) {
       {/* Introduction */}
       <NarrativeSection>
         <div className="prose prose-zinc dark:prose-invert max-w-none">
-          <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
-            Hi. I'm <span className="font-semibold text-black dark:text-white">Baptiste</span>.
+          <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+            Hi. I'm <span className="font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent">Baptiste</span>.
           </p>
-          <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
+          <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
             We'll be exploring the data behind{" "}
-            <span className="font-semibold text-black dark:text-white">NDIS plan management</span>.
+            <span className="font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent">NDIS plan management</span>.
           </p>
-          <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
-            In the data, there are <span className="font-semibold text-black dark:text-white">{tables.length} tables</span>:
+          <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+            In the data, there are <span className="font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent">{tables.length} tables</span>:
           </p>
         </div>
       </NarrativeSection>
@@ -176,16 +176,16 @@ export default function DataStory({ data, tables }: DataStoryProps) {
           {tables.map((table, index) => (
             <div
               key={table}
-              className="group relative overflow-hidden rounded-lg border-2 border-zinc-200 dark:border-zinc-700 p-6 hover:border-black dark:hover:border-zinc-50 transition-all duration-300 hover:shadow-xl"
+              className="group relative overflow-hidden rounded-lg border-2 border-cyan-200 dark:border-cyan-900/50 p-6 hover:border-cyan-500 dark:hover:border-cyan-600 hover:shadow-lg hover:shadow-cyan-500/20 transition-all duration-300 bg-gradient-to-br from-white to-cyan-50/30 dark:from-slate-800 dark:to-cyan-950/30"
             >
-              <div className="absolute top-2 left-2 text-4xl font-bold text-zinc-100 dark:text-zinc-800">
+              <div className="absolute top-2 left-2 text-4xl font-bold text-cyan-100/50 dark:text-cyan-900/50">
                 {index + 1}
               </div>
               <div className="relative z-10">
-                <p className="text-sm font-mono text-zinc-600 dark:text-zinc-400 mb-1">
+                <p className="text-sm font-mono text-cyan-600 dark:text-cyan-400 mb-1">
                   TABLE {index + 1}
                 </p>
-                <h3 className="text-lg font-semibold text-black dark:text-zinc-50 break-words">
+                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-50 break-words">
                   {table}
                 </h3>
               </div>
@@ -197,46 +197,46 @@ export default function DataStory({ data, tables }: DataStoryProps) {
       {/* Story Section 1: Overview */}
       <NarrativeSection>
         <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
-          <h2 className="text-2xl font-bold text-black dark:text-white mb-4">
+          <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
             The Big Picture
           </h2>
-          <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
+          <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
             Each of these tables provide different pieces of valuable information. To give some context:
           </p>
         </div>
 
         {invoiceStats && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
-            <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-8 text-center">
-              <p className="text-sm uppercase tracking-wide text-zinc-600 dark:text-zinc-400 mb-2">
+            <div className="bg-gradient-to-br from-cyan-500 to-blue-500 dark:from-cyan-600 dark:to-blue-600 rounded-lg p-8 text-center shadow-lg shadow-cyan-500/30">
+              <p className="text-sm uppercase tracking-wide text-cyan-100 dark:text-cyan-200 mb-2">
                 participants
               </p>
-              <p className="text-5xl font-bold text-black dark:text-white">
+              <p className="text-5xl font-bold text-white">
                 {invoiceStats.individualsHelped.toLocaleString()}
               </p>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-2">
+              <p className="text-sm text-cyan-100 dark:text-cyan-200 mt-2">
                 individuals helped
               </p>
             </div>
-            <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-8 text-center">
-              <p className="text-sm uppercase tracking-wide text-zinc-600 dark:text-zinc-400 mb-2">
+            <div className="bg-gradient-to-br from-blue-500 to-indigo-500 dark:from-blue-600 dark:to-indigo-600 rounded-lg p-8 text-center shadow-lg shadow-blue-500/30">
+              <p className="text-sm uppercase tracking-wide text-blue-100 dark:text-blue-200 mb-2">
                 Total Invoices
               </p>
-              <p className="text-5xl font-bold text-black dark:text-white">
+              <p className="text-5xl font-bold text-white">
                 {invoiceStats.totalInvoices.toLocaleString()}
               </p>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-2">
+              <p className="text-sm text-blue-100 dark:text-blue-200 mt-2">
                 records in the system
               </p>
             </div>
-            <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-8 text-center">
-              <p className="text-sm uppercase tracking-wide text-zinc-600 dark:text-zinc-400 mb-2">
+            <div className="bg-gradient-to-br from-indigo-500 to-purple-500 dark:from-indigo-600 dark:to-purple-600 rounded-lg p-8 text-center shadow-lg shadow-indigo-500/30">
+              <p className="text-sm uppercase tracking-wide text-indigo-100 dark:text-indigo-200 mb-2">
                 Total Value
               </p>
-              <p className="text-5xl font-bold text-black dark:text-white">
+              <p className="text-5xl font-bold text-white">
                 ${(invoiceStats.totalAmount / 1000).toFixed(1)}k
               </p>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-2">
+              <p className="text-sm text-indigo-100 dark:text-indigo-200 mt-2">
                 in managed funds
               </p>
             </div>
@@ -246,13 +246,14 @@ export default function DataStory({ data, tables }: DataStoryProps) {
 
       {/* Story Section 2: Trends */}
       {monthlyTrend.length > 0 && (
+        <>
         <NarrativeSection>
           <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
-            <h2 className="text-2xl font-bold text-black dark:text-white mb-4">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
               All is not equal
             </h2>
-            <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
-              At first, it may look like there are about 2 invoices per participant, and each invoice is for about $6k. But the data tells a different story:
+            <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+              At first, it may look like there are about 2 invoices per participant, and each invoice is for about $600. But looking at the data helps us see the real story:
 
 
             </p>
@@ -262,23 +263,30 @@ export default function DataStory({ data, tables }: DataStoryProps) {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
             {/* Invoices per Customer Distribution */}
             {invoicesPerCustomer.length > 0 && (
-              <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-6">
-                <h3 className="text-lg font-semibold mb-4 text-black dark:text-zinc-50">
+              <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-cyan-200 dark:border-cyan-900/50 rounded-lg p-6 shadow-lg">
+                <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent">
                   Invoices per Participant
                 </h3>
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={invoicesPerCustomer}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                    <XAxis dataKey="bucket" stroke="#71717a" />
-                    <YAxis stroke="#71717a" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#22d3ee" opacity={0.1} />
+                    <XAxis dataKey="bucket" stroke="#06b6d4" />
+                    <YAxis stroke="#06b6d4" />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "#18181b",
-                        border: "1px solid #3f3f46",
+                        backgroundColor: "#0e7490",
+                        border: "2px solid #06b6d4",
                         borderRadius: "0.5rem",
+                        color: "#fff",
                       }}
                     />
-                    <Bar dataKey="count" fill="#000000" />
+                    <Bar dataKey="count" fill="url(#colorGradient1)" />
+                    <defs>
+                      <linearGradient id="colorGradient1" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#06b6d4" />
+                        <stop offset="100%" stopColor="#0891b2" />
+                      </linearGradient>
+                    </defs>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -286,23 +294,30 @@ export default function DataStory({ data, tables }: DataStoryProps) {
 
             {/* Invoice Value Distribution */}
             {invoiceValueDistribution.length > 0 && (
-              <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-6">
-                <h3 className="text-lg font-semibold mb-4 text-black dark:text-zinc-50">
+              <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-blue-200 dark:border-blue-900/50 rounded-lg p-6 shadow-lg">
+                <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">
                   Invoice Value Distribution
                 </h3>
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={invoiceValueDistribution}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                    <XAxis dataKey="bucket" stroke="#71717a" />
-                    <YAxis stroke="#71717a" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#3b82f6" opacity={0.1} />
+                    <XAxis dataKey="bucket" stroke="#2563eb" />
+                    <YAxis stroke="#2563eb" />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "#18181b",
-                        border: "1px solid #3f3f46",
+                        backgroundColor: "#1e40af",
+                        border: "2px solid #2563eb",
                         borderRadius: "0.5rem",
+                        color: "#fff",
                       }}
                     />
-                    <Bar dataKey="count" fill="#000000" />
+                    <Bar dataKey="count" fill="url(#colorGradient2)" />
+                    <defs>
+                      <linearGradient id="colorGradient2" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#2563eb" />
+                      </linearGradient>
+                    </defs>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -310,24 +325,42 @@ export default function DataStory({ data, tables }: DataStoryProps) {
           </div>
 
           <div className="mt-6 prose prose-zinc dark:prose-invert max-w-none">
-            <p className="text-base leading-relaxed text-zinc-600 dark:text-zinc-400">
-              text
+            <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400">
+              Generally, invoices are small (under $1k), and most participants only have 1 invoice. But there are some big outliers—participants with many invoices, and some very high-value invoices.
             </p>
           </div>
         </NarrativeSection>
+        <NarrativeSection>
+          <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
+              Invoices
+            </h2>
+            <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+              The same is true for invoice management.
+
+            </p>
+          </div>
+
+          <div className="mt-6 prose prose-zinc dark:prose-invert max-w-none">
+            <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400">
+              Most invoices are small (under $300), and most participants only have 1 invoice. But there are some big outliers—participants with many invoices, and some very high-value invoices.
+            </p>
+          </div>
+        </NarrativeSection>
+        </>
       )}
 
       {/* Story Section 3: What's Next */}
-      <NarrativeSection className="border-2 border-black dark:border-zinc-50">
+      <NarrativeSection className="border-4 border-cyan-500 dark:border-cyan-600 bg-gradient-to-br from-cyan-50 to-blue-50 dark:from-cyan-950/30 dark:to-blue-950/30">
         <div className="prose prose-zinc dark:prose-invert max-w-none">
-          <h2 className="text-2xl font-bold text-black dark:text-white mb-4">
+          <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
             Dive Deeper
           </h2>
-          <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
+          <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
             This is just the beginning. The data holds much more—relationships between providers
             and participants, error patterns, service utilization trends, and operational insights.
           </p>
-          <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
+          <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
             Ready to explore the raw data? Use the table view to dig into specific records, apply
             filters, and download data for your own analysis.
           </p>

@@ -10,7 +10,7 @@ interface TableViewProps {
 export default function TableView({ tableData, loading }: TableViewProps) {
   if (loading) {
     return (
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6">
+      <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-xl border border-cyan-100 dark:border-slate-800 p-6">
         <LoadingSpinner />
       </div>
     );
@@ -18,9 +18,9 @@ export default function TableView({ tableData, loading }: TableViewProps) {
 
   if (!tableData) {
     return (
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6">
+      <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-xl border border-cyan-100 dark:border-slate-800 p-6">
         <div className="text-center py-12">
-          <p className="text-lg text-zinc-500 dark:text-zinc-400">
+          <p className="text-lg text-slate-500 dark:text-slate-400">
             Select a table to view its data
           </p>
         </div>
@@ -29,13 +29,13 @@ export default function TableView({ tableData, loading }: TableViewProps) {
   }
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6">
+    <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-xl border border-cyan-100 dark:border-slate-800 p-6">
       <div className="mb-4 flex justify-between items-start">
         <div>
-          <h2 className="text-xl font-semibold text-black dark:text-zinc-50">
+          <h2 className="text-xl font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent">
             {tableData.tableName}
           </h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
             {tableData.rowCount} rows, {tableData.columns.length} columns
           </p>
         </div>
@@ -46,7 +46,7 @@ export default function TableView({ tableData, loading }: TableViewProps) {
       </div>
 
       {tableData.data.length === 0 ? (
-        <p className="text-zinc-500 dark:text-zinc-400">
+        <p className="text-slate-500 dark:text-slate-400">
           No data in this table
         </p>
       ) : (

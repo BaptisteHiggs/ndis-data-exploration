@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import ErrorDisplay from "@/components/ErrorDisplay";
-import Dashboard from "@/components/Dashboard";
+import DataStory from "@/components/DataStory";
 
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
   const [data, setData] = useState<any[]>([]);
+  const [tables, setTables] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -24,25 +25,34 @@ export default function Home() {
 
       try {
         setLoading(true);
-        const response = await fetch("/api/dashboard-data", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ password }),
-        });
 
-        const result = await response.json();
+        // Fetch both dashboard data and table names in parallel
+        const [dataResponse, tablesResponse] = await Promise.all([
+          fetch("/api/dashboard-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password }),
+          }),
+          fetch("/api/list-tables", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password }),
+          }),
+        ]);
 
-        if (!response.ok) {
-          if (response.status === 401) {
+        const dataResult = await dataResponse.json();
+        const tablesResult = await tablesResponse.json();
+
+        if (!dataResponse.ok) {
+          if (dataResponse.status === 401) {
             sessionStorage.clear();
             router.push("/setup");
             return;
           }
-          setError(result.error || "Failed to load dashboard data");
+          setError(dataResult.error || "Failed to load dashboard data");
         } else {
-          setData(result.data || []);
+          setData(dataResult.data || []);
+          setTables(tablesResult.tables || []);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error occurred");
@@ -66,7 +76,7 @@ export default function Home() {
         <header className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6 mb-4">
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-              NDIS Data Dashboard
+              NDIS Data Story
             </h1>
             <div className="flex gap-3">
               <Link
@@ -95,8 +105,8 @@ export default function Home() {
         {/* Error State */}
         {error && !loading && <ErrorDisplay message={error} />}
 
-        {/* Dashboard */}
-        {!loading && !error && <Dashboard data={data} />}
+        {/* Data Story */}
+        {!loading && !error && <DataStory data={data} tables={tables} />}
       </div>
     </div>
   );

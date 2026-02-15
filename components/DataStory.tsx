@@ -37,7 +37,22 @@ export default function DataStory({ data, tables }: DataStoryProps) {
       totalAmount = data.reduce((sum, row) => sum + (row[numericColumns[0]] || 0), 0);
     }
 
-    return { totalInvoices, totalAmount };
+    let individualsHelped = 0;
+    const participantIdCol = Object.keys(data[0]).find((col) =>
+      col.toLowerCase().includes("participant") && col.toLowerCase().includes("id")
+    );
+
+    if (participantIdCol) {
+      const uniqueParticipants = new Set();
+      data.forEach((row) => {
+        if (row[participantIdCol]) {
+          uniqueParticipants.add(row[participantIdCol]);
+        }
+      });
+      individualsHelped = uniqueParticipants.size;
+    }
+
+    return { totalInvoices, totalAmount, individualsHelped }; // Assuming 1 invoice per individual for simplicity
   }, [data]);
 
   // Create monthly trend data
@@ -116,14 +131,12 @@ export default function DataStory({ data, tables }: DataStoryProps) {
             The Big Picture
           </h2>
           <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
-            Let's start with what we have. The NDIS invoices dataset contains valuable information
-            about plan management operations. Each record represents a transaction or event in the
-            plan management lifecycle.
+            Each of these tables provide different pieces of valuable information. To give some context:
           </p>
         </div>
 
         {invoiceStats && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
             <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-8 text-center">
               <p className="text-sm uppercase tracking-wide text-zinc-600 dark:text-zinc-400 mb-2">
                 Total Invoices
@@ -144,6 +157,17 @@ export default function DataStory({ data, tables }: DataStoryProps) {
               </p>
               <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-2">
                 in managed funds
+              </p>
+            </div>
+            <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-8 text-center">
+              <p className="text-sm uppercase tracking-wide text-zinc-600 dark:text-zinc-400 mb-2">
+                participants
+              </p>
+              <p className="text-5xl font-bold text-black dark:text-white">
+                {invoiceStats.individualsHelped.toLocaleString()}
+              </p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-2">
+                individuals helped
               </p>
             </div>
           </div>

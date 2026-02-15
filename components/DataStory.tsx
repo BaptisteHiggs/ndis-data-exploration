@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import {
   BarChart,
   Bar,
@@ -250,7 +251,7 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
     if (!invoiceIdCol) return [];
 
     // Aggregate data per invoice
-    const invoiceMetrics: Record<string, { activeTime: number; sessionCount: number; errorCodes: string[] }> = {};
+    const invoiceMetrics: Record<string, { activeTime: number; sessionCount: number; errorCodes: string[]; ignoredErrorCodes: string[] }> = {};
 
     // Sum active duration and count sessions per invoice
     sessionsData.forEach((row) => {
@@ -258,16 +259,16 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
       if (!invoiceId) return;
 
       if (!invoiceMetrics[invoiceId]) {
-        invoiceMetrics[invoiceId] = { activeTime: 0, sessionCount: 0, errorCodes: [] };
+        invoiceMetrics[invoiceId] = { activeTime: 0, sessionCount: 0, errorCodes: [], ignoredErrorCodes: [] };
       }
 
       invoiceMetrics[invoiceId].activeTime += row.active_duration_seconds || 0;
       invoiceMetrics[invoiceId].sessionCount += 1;
     });
 
-    // Extract error codes from ndis_invoices state_management column
+    // Extract error codes and ignored error codes from ndis_invoices state_management column
     const dataInvoiceIdCol = Object.keys(data[0]).find((col) =>
-      col.toLowerCase().includes("invoice") && col.toLowerCase().includes("id")
+      col.toLowerCase().includes("id")
     );
 
     if (dataInvoiceIdCol) {
@@ -275,7 +276,7 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
         const invoiceId = row[dataInvoiceIdCol];
         if (!invoiceId) return;
 
-        // Parse state_management JSON to get errors (not ignored_errors)
+        // Parse state_management JSON to get errors and ignored_errors
         if (row.state_management) {
           try {
             const stateManagement = typeof row.state_management === 'string'
@@ -283,12 +284,14 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
               : row.state_management;
 
             const errors = stateManagement?.errors || [];
+            const ignoredErrors = stateManagement?.ignored_errors || [];
 
-            if (errors.length > 0) {
+            if (errors.length > 0 || ignoredErrors.length > 0) {
               if (!invoiceMetrics[invoiceId]) {
-                invoiceMetrics[invoiceId] = { activeTime: 0, sessionCount: 0, errorCodes: [] };
+                invoiceMetrics[invoiceId] = { activeTime: 0, sessionCount: 0, errorCodes: [], ignoredErrorCodes: [] };
               }
               invoiceMetrics[invoiceId].errorCodes = errors;
+              invoiceMetrics[invoiceId].ignoredErrorCodes = ignoredErrors;
             }
           } catch (e) {
             // Skip if JSON parsing fails
@@ -305,14 +308,16 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
     const maxActiveTime = Math.max(...values.map(v => v.activeTime));
     const maxSessions = Math.max(...values.map(v => v.sessionCount));
     const maxErrors = Math.max(...values.map(v => v.errorCodes.length));
+    const maxIgnoredErrors = Math.max(...values.map(v => v.ignoredErrorCodes.length));
 
     // Calculate efficiency scores for each invoice
     const invoiceScores = invoiceEntries.map(([invoiceId, metrics]) => {
       const normActiveTime = maxActiveTime > 0 ? metrics.activeTime / maxActiveTime : 0;
       const normSessions = maxSessions > 0 ? metrics.sessionCount / maxSessions : 0;
       const normErrors = maxErrors > 0 ? metrics.errorCodes.length / maxErrors : 0;
+      const normIgnoredErrors = maxIgnoredErrors > 0 ? metrics.ignoredErrorCodes.length / maxIgnoredErrors : 0;
 
-      const score = normActiveTime * 0.6 + normSessions * 0.2 + normErrors * 0.2;
+      const score = normActiveTime * 0.5 + normSessions * 0.2 + normErrors * 0.2 + normIgnoredErrors * 0.1;
 
       return {
         invoiceId,
@@ -320,6 +325,7 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
         activeTime: metrics.activeTime,
         sessionCount: metrics.sessionCount,
         errorCodes: metrics.errorCodes,
+        ignoredErrorCodes: metrics.ignoredErrorCodes,
       };
     });
 
@@ -329,6 +335,228 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
       .slice(0, 100)
       .map((item, index) => ({ ...item, index: index + 1 }));
   }, [sessionsData, data]);
+
+  // Error frequency analysis - count all errors (ignored and non-ignored)
+  const errorFrequency = useMemo(() => {
+    if (!data || data.length === 0) return [];
+
+    const errorCounts: Record<string, number> = {};
+
+    data.forEach((row) => {
+      if (row.state_management) {
+        try {
+          const stateManagement = typeof row.state_management === 'string'
+            ? JSON.parse(row.state_management)
+            : row.state_management;
+
+          const errors = stateManagement?.errors || [];
+          const ignoredErrors = stateManagement?.ignored_errors || [];
+          const allErrors = [...errors, ...ignoredErrors];
+
+          allErrors.forEach((errorCode) => {
+            errorCounts[errorCode] = (errorCounts[errorCode] || 0) + 1;
+          });
+        } catch (e) {
+          // Skip if JSON parsing fails
+        }
+      }
+    });
+
+    return Object.entries(errorCounts)
+      .map(([errorCode, count]) => ({ errorCode, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 15); // Top 15 most frequent errors
+  }, [data]);
+
+  // Average efficiency score by error code
+  const avgScoreByError = useMemo(() => {
+    if (!sessionsData || sessionsData.length === 0 || !data || data.length === 0) return [];
+
+    // First, calculate efficiency scores for all invoices (not just top 100)
+    const invoiceIdCol = Object.keys(sessionsData[0]).find((col) =>
+      col.toLowerCase().includes("invoice") && col.toLowerCase().includes("id")
+    );
+    if (!invoiceIdCol) return [];
+
+    const invoiceMetrics: Record<string, { activeTime: number; sessionCount: number; errorCodes: string[]; ignoredErrorCodes: string[] }> = {};
+
+    sessionsData.forEach((row) => {
+      const invoiceId = row[invoiceIdCol];
+      if (!invoiceId) return;
+      if (!invoiceMetrics[invoiceId]) {
+        invoiceMetrics[invoiceId] = { activeTime: 0, sessionCount: 0, errorCodes: [], ignoredErrorCodes: [] };
+      }
+      invoiceMetrics[invoiceId].activeTime += row.active_duration_seconds || 0;
+      invoiceMetrics[invoiceId].sessionCount += 1;
+    });
+
+    const dataInvoiceIdCol = Object.keys(data[0]).find((col) =>
+      col.toLowerCase().includes("id")
+    );
+
+    if (dataInvoiceIdCol) {
+      data.forEach((row) => {
+        const invoiceId = row[dataInvoiceIdCol];
+        if (!invoiceId) return;
+        if (row.state_management) {
+          try {
+            const stateManagement = typeof row.state_management === 'string'
+              ? JSON.parse(row.state_management)
+              : row.state_management;
+            const errors = stateManagement?.errors || [];
+            const ignoredErrors = stateManagement?.ignored_errors || [];
+            if (errors.length > 0 || ignoredErrors.length > 0) {
+              if (!invoiceMetrics[invoiceId]) {
+                invoiceMetrics[invoiceId] = { activeTime: 0, sessionCount: 0, errorCodes: [], ignoredErrorCodes: [] };
+              }
+              invoiceMetrics[invoiceId].errorCodes = errors;
+              invoiceMetrics[invoiceId].ignoredErrorCodes = ignoredErrors;
+            }
+          } catch (e) {
+            // Skip if JSON parsing fails
+          }
+        }
+      });
+    }
+
+    const values = Object.values(invoiceMetrics);
+    const maxActiveTime = Math.max(...values.map(v => v.activeTime));
+    const maxSessions = Math.max(...values.map(v => v.sessionCount));
+    const maxErrors = Math.max(...values.map(v => v.errorCodes.length));
+    const maxIgnoredErrors = Math.max(...values.map(v => v.ignoredErrorCodes.length));
+
+    const invoiceScoresWithErrors = Object.entries(invoiceMetrics).map(([invoiceId, metrics]) => {
+      const normActiveTime = maxActiveTime > 0 ? metrics.activeTime / maxActiveTime : 0;
+      const normSessions = maxSessions > 0 ? metrics.sessionCount / maxSessions : 0;
+      const normErrors = maxErrors > 0 ? metrics.errorCodes.length / maxErrors : 0;
+      const normIgnoredErrors = maxIgnoredErrors > 0 ? metrics.ignoredErrorCodes.length / maxIgnoredErrors : 0;
+      const score = normActiveTime * 0.5 + normSessions * 0.2 + normErrors * 0.2 + normIgnoredErrors * 0.1;
+
+      return {
+        invoiceId,
+        score,
+        allErrors: [...metrics.errorCodes, ...metrics.ignoredErrorCodes],
+      };
+    });
+
+    // Calculate average score per error code
+    const errorScores: Record<string, { totalScore: number; count: number }> = {};
+
+    invoiceScoresWithErrors.forEach((invoice) => {
+      invoice.allErrors.forEach((errorCode) => {
+        if (!errorScores[errorCode]) {
+          errorScores[errorCode] = { totalScore: 0, count: 0 };
+        }
+        errorScores[errorCode].totalScore += invoice.score;
+        errorScores[errorCode].count += 1;
+      });
+    });
+
+    return Object.entries(errorScores)
+      .map(([errorCode, { totalScore, count }]) => ({
+        errorCode,
+        avgScore: totalScore / count,
+        count,
+      }))
+      .sort((a, b) => b.avgScore - a.avgScore)
+      .slice(0, 15); // Top 15 errors by worst average score
+  }, [sessionsData, data]);
+
+  // Total cumulative time by error code
+  const cumulativeTimeByError = useMemo(() => {
+    if (!sessionsData || sessionsData.length === 0 || !data || data.length === 0) return [];
+
+    const invoiceIdCol = Object.keys(sessionsData[0]).find((col) =>
+      col.toLowerCase().includes("invoice") && col.toLowerCase().includes("id")
+    );
+    if (!invoiceIdCol) return [];
+
+    // Build mapping of invoice ID to active time
+    const invoiceActiveTimes: Record<string, number> = {};
+    sessionsData.forEach((row) => {
+      const invoiceId = row[invoiceIdCol];
+      if (!invoiceId) return;
+      invoiceActiveTimes[invoiceId] = (invoiceActiveTimes[invoiceId] || 0) + (row.active_duration_seconds || 0);
+    });
+
+    // Build mapping of invoice ID to all error codes
+    const invoiceErrors: Record<string, string[]> = {};
+    const dataInvoiceIdCol = Object.keys(data[0]).find((col) =>
+      col.toLowerCase().includes("id")
+    );
+
+    if (dataInvoiceIdCol) {
+      data.forEach((row) => {
+        const invoiceId = row[dataInvoiceIdCol];
+        if (!invoiceId) return;
+        if (row.state_management) {
+          try {
+            const stateManagement = typeof row.state_management === 'string'
+              ? JSON.parse(row.state_management)
+              : row.state_management;
+            const errors = stateManagement?.errors || [];
+            const ignoredErrors = stateManagement?.ignored_errors || [];
+            const allErrors = [...errors, ...ignoredErrors];
+            if (allErrors.length > 0) {
+              invoiceErrors[invoiceId] = allErrors;
+            }
+          } catch (e) {
+            // Skip if JSON parsing fails
+          }
+        }
+      });
+    }
+
+    // Calculate cumulative time per error code
+    const errorTimes: Record<string, number> = {};
+    Object.entries(invoiceErrors).forEach(([invoiceId, errorCodes]) => {
+      const activeTime = invoiceActiveTimes[invoiceId] || 0;
+      errorCodes.forEach((errorCode) => {
+        errorTimes[errorCode] = (errorTimes[errorCode] || 0) + activeTime;
+      });
+    });
+
+    return Object.entries(errorTimes)
+      .map(([errorCode, totalTime]) => ({
+        errorCode,
+        totalTime: totalTime / 60, // Convert to minutes
+        totalTimeSeconds: totalTime,
+      }))
+      .sort((a, b) => b.totalTime - a.totalTime)
+      .slice(0, 15); // Top 15 errors by cumulative time
+  }, [sessionsData, data]);
+
+  // Priority errors - combine top 3 from each metric
+  const priorityErrors = useMemo(() => {
+    if (!errorsData || errorsData.length === 0) return [];
+
+    // Get top 3 from each chart
+    const topFrequent = errorFrequency.slice(0, 3).map(e => e.errorCode);
+    const topImpact = avgScoreByError.slice(0, 3).map(e => e.errorCode);
+    const topTime = cumulativeTimeByError.slice(0, 3).map(e => e.errorCode);
+
+    // Create unique set of priority errors
+    const prioritySet = new Set([...topFrequent, ...topImpact, ...topTime]);
+
+    // Match with error catalogue and add metric info
+    return Array.from(prioritySet).map(errorCode => {
+      // Try to find in catalogue by different possible column names
+      const catalogueEntry = errorsData.find(e =>
+        e.error_code === errorCode ||
+        e.code === errorCode ||
+        e.id === errorCode ||
+        e.error_id === errorCode
+      );
+
+      return {
+        errorCode,
+        isFrequent: topFrequent.includes(errorCode),
+        isHighImpact: topImpact.includes(errorCode),
+        isHighTime: topTime.includes(errorCode),
+        details: catalogueEntry || null,
+      };
+    });
+  }, [errorFrequency, avgScoreByError, cumulativeTimeByError, errorsData]);
 
   return (
     <div className="space-y-8">
@@ -693,29 +921,49 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
                   Number of unignored errors
                 </span>
               </li>
+              <li className="flex items-start gap-3">
+                <span className="flex-shrink-0 w-2 h-2 mt-2.5 rounded-full bg-gradient-to-r from-purple-500 to-pink-500"></span>
+                <span className="text-lg text-slate-700 dark:text-slate-300">
+                  Number of ignored errors
+                </span>
+              </li>
             </ul>
 
             {/* Aesthetic Equation */}
             <div className="mt-8 p-6 bg-gradient-to-r from-cyan-50 to-blue-50 dark:from-cyan-950/30 dark:to-blue-950/30 rounded-lg border-2 border-cyan-200 dark:border-cyan-800 shadow-lg">
-              <div className="flex items-center justify-center flex-wrap gap-2.5 font-mono text-lg">
-                <span className="font-semibold text-slate-800 dark:text-slate-200 text-base">Score =</span>
-                <span className="text-cyan-600 dark:text-cyan-400 font-medium">normalised(</span>
-                <span className="text-slate-700 dark:text-slate-300 italic">total</span>
-                <span className="text-cyan-600 dark:text-cyan-400 font-medium">)</span>
-                <span className="text-slate-600 dark:text-slate-400">×</span>
-                <span className="font-bold text-cyan-600 dark:text-cyan-400">0.6</span>
-                <span className="text-slate-500 dark:text-slate-400 text-xl">+</span>
-                <span className="text-blue-600 dark:text-blue-400 font-medium">normalised(</span>
-                <span className="text-slate-700 dark:text-slate-300 italic">sessions</span>
-                <span className="text-blue-600 dark:text-blue-400 font-medium">)</span>
-                <span className="text-slate-600 dark:text-slate-400">×</span>
-                <span className="font-bold text-blue-600 dark:text-blue-400">0.2</span>
-                <span className="text-slate-500 dark:text-slate-400 text-xl">+</span>
-                <span className="text-indigo-600 dark:text-indigo-400 font-medium">normalised(</span>
-                <span className="text-slate-700 dark:text-slate-300 italic">errors</span>
-                <span className="text-indigo-600 dark:text-indigo-400 font-medium">)</span>
-                <span className="text-slate-600 dark:text-slate-400">×</span>
-                <span className="font-bold text-indigo-600 dark:text-indigo-400">0.2</span>
+              <div className="flex flex-col items-center justify-center gap-1 font-mono text-lg">
+                <div className="flex items-center gap-2.5">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 text-base">Score =</span>
+                  <span className="text-cyan-600 dark:text-cyan-400 font-medium">normalised(</span>
+                  <span className="text-slate-700 dark:text-slate-300 italic">total</span>
+                  <span className="text-cyan-600 dark:text-cyan-400 font-medium">)</span>
+                  <span className="text-slate-600 dark:text-slate-400">×</span>
+                  <span className="font-bold text-cyan-600 dark:text-cyan-400">0.5</span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-slate-500 dark:text-slate-400 text-xl">+</span>
+                  <span className="text-blue-600 dark:text-blue-400 font-medium">normalised(</span>
+                  <span className="text-slate-700 dark:text-slate-300 italic">sessions</span>
+                  <span className="text-blue-600 dark:text-blue-400 font-medium">)</span>
+                  <span className="text-slate-600 dark:text-slate-400">×</span>
+                  <span className="font-bold text-blue-600 dark:text-blue-400">0.2</span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-slate-500 dark:text-slate-400 text-xl">+</span>
+                  <span className="text-indigo-600 dark:text-indigo-400 font-medium">normalised(</span>
+                  <span className="text-slate-700 dark:text-slate-300 italic">errors</span>
+                  <span className="text-indigo-600 dark:text-indigo-400 font-medium">)</span>
+                  <span className="text-slate-600 dark:text-slate-400">×</span>
+                  <span className="font-bold text-indigo-600 dark:text-indigo-400">0.2</span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-slate-500 dark:text-slate-400 text-xl">+</span>
+                  <span className="text-purple-600 dark:text-purple-400 font-medium">normalised(</span>
+                  <span className="text-slate-700 dark:text-slate-300 italic">ignored errors</span>
+                  <span className="text-purple-600 dark:text-purple-400 font-medium">)</span>
+                  <span className="text-slate-600 dark:text-slate-400">×</span>
+                  <span className="font-bold text-purple-600 dark:text-purple-400">0.1</span>
+                </div>
               </div>
             </div>
             <br />
@@ -781,6 +1029,14 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
                             ) : (
                               <p className="text-red-100 text-sm">Errors: None</p>
                             )}
+                            {data.ignoredErrorCodes && data.ignoredErrorCodes.length > 0 ? (
+                              <div className="text-red-100 text-sm mt-1">
+                                <p className="font-medium">Ignored Errors:</p>
+                                <p className="ml-2">{data.ignoredErrorCodes.join(", ")}</p>
+                              </div>
+                            ) : (
+                              <p className="text-red-100 text-sm">Ignored Errors: None</p>
+                            )}
                           </div>
                         );
                       }
@@ -798,16 +1054,260 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
               </ResponsiveContainer>
             </div>
           )}
+        </NarrativeSection>
+
+        {/* Error Analysis Section */}
+        <NarrativeSection>
+          <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
+              Which Errors Should We Address?
+            </h2>
+            <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+              One way efficiency can be improved is by automating error resolution. If errors are able to be resolved to increase efficiency, which errors should be prioritised?
+            </p>
+          </div>
+
+          {/* Three column grid for charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
+            {/* Error Frequency Chart */}
+            {errorFrequency.length > 0 && (
+              <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-orange-200 dark:border-orange-900/50 rounded-lg p-6 shadow-lg">
+                <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-orange-600 to-red-600 dark:from-orange-400 dark:to-red-400 bg-clip-text text-transparent">
+                  Most Frequent Errors
+                </h3>
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={errorFrequency} layout="vertical" margin={{ top: 5, right: 20, bottom: 5, left: 60 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#fb923c" opacity={0.1} />
+                    <XAxis type="number" stroke="#ea580c" />
+                    <YAxis
+                      type="category"
+                      dataKey="errorCode"
+                      stroke="#ea580c"
+                      width={55}
+                      tick={{ fontSize: 12 }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#7c2d12",
+                        border: "2px solid #ea580c",
+                        borderRadius: "0.5rem",
+                        color: "#fff",
+                      }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div className="bg-orange-900 border-2 border-orange-600 rounded-lg p-3 shadow-xl">
+                              <p className="font-bold text-white mb-1">Error {data.errorCode}</p>
+                              <p className="text-orange-100 text-sm">Occurrences: {data.count}</p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar dataKey="count" fill="url(#colorGradient8)" />
+                    <defs>
+                      <linearGradient id="colorGradient8" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="#fb923c" />
+                        <stop offset="100%" stopColor="#ea580c" />
+                      </linearGradient>
+                    </defs>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Average Score by Error Chart */}
+            {avgScoreByError.length > 0 && (
+              <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-rose-200 dark:border-rose-900/50 rounded-lg p-6 shadow-lg">
+                <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-rose-600 to-pink-600 dark:from-rose-400 dark:to-pink-400 bg-clip-text text-transparent">
+                  Errors with Worst Avg. Efficiency
+                </h3>
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={avgScoreByError} layout="vertical" margin={{ top: 5, right: 20, bottom: 5, left: 60 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#fb7185" opacity={0.1} />
+                    <XAxis type="number" stroke="#e11d48" />
+                    <YAxis
+                      type="category"
+                      dataKey="errorCode"
+                      stroke="#e11d48"
+                      width={55}
+                      tick={{ fontSize: 12 }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#881337",
+                        border: "2px solid #e11d48",
+                        borderRadius: "0.5rem",
+                        color: "#fff",
+                      }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div className="bg-rose-900 border-2 border-rose-600 rounded-lg p-3 shadow-xl">
+                              <p className="font-bold text-white mb-1">Error {data.errorCode}</p>
+                              <p className="text-rose-100 text-sm">Avg. Score: {data.avgScore.toFixed(3)}</p>
+                              <p className="text-rose-100 text-sm">Occurrences: {data.count}</p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar dataKey="avgScore" fill="url(#colorGradient9)" />
+                    <defs>
+                      <linearGradient id="colorGradient9" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="#fb7185" />
+                        <stop offset="100%" stopColor="#e11d48" />
+                      </linearGradient>
+                    </defs>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Cumulative Time by Error Chart */}
+            {cumulativeTimeByError.length > 0 && (
+              <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-emerald-200 dark:border-emerald-900/50 rounded-lg p-6 shadow-lg">
+                <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-emerald-600 to-teal-600 dark:from-emerald-400 dark:to-teal-400 bg-clip-text text-transparent">
+                  Total Time Spent on Errors
+                </h3>
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={cumulativeTimeByError} layout="vertical" margin={{ top: 5, right: 20, bottom: 5, left: 60 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#34d399" opacity={0.1} />
+                    <XAxis type="number" stroke="#059669" />
+                    <YAxis
+                      type="category"
+                      dataKey="errorCode"
+                      stroke="#059669"
+                      width={55}
+                      tick={{ fontSize: 12 }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#064e3b",
+                        border: "2px solid #059669",
+                        borderRadius: "0.5rem",
+                        color: "#fff",
+                      }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          const hours = Math.floor(data.totalTime / 60);
+                          const minutes = Math.floor(data.totalTime % 60);
+                          return (
+                            <div className="bg-emerald-900 border-2 border-emerald-600 rounded-lg p-3 shadow-xl">
+                              <p className="font-bold text-white mb-1">Error {data.errorCode}</p>
+                              <p className="text-emerald-100 text-sm">
+                                Total Time: {hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`}
+                              </p>
+                              <p className="text-emerald-100 text-sm text-xs opacity-75">
+                                ({data.totalTime.toFixed(0)} minutes)
+                              </p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar dataKey="totalTime" fill="url(#colorGradient10)" />
+                    <defs>
+                      <linearGradient id="colorGradient10" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="#34d399" />
+                        <stop offset="100%" stopColor="#059669" />
+                      </linearGradient>
+                    </defs>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
 
           <div className="mt-6 prose prose-zinc dark:prose-invert max-w-none">
             <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400">
-              These represent the most problematic invoices based on our efficiency formula. The chart shows a clear view of which specific invoices need attention, with detailed metrics available on hover.
+              While this doesn't tell the whole story, it provides a helpful starting point for identifying where efficiency could be improved.
             </p>
           </div>
+
+          {/* Priority Errors Display */}
+          {priorityErrors.length > 0 && (
+            <div className="mt-8">
+              <h3 className="text-xl font-semibold bg-gradient-to-r from-red-600 to-orange-600 dark:from-red-400 dark:to-orange-400 bg-clip-text text-transparent mb-4">
+                Priority Errors to Address
+              </h3>
+              <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400 mb-6">
+                Based on the analysis above, these errors appear in the top 3 of at least one metric and should be prioritized:
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {priorityErrors.map((error) => (
+                  <div
+                    key={error.errorCode}
+                    className="group relative overflow-hidden rounded-lg border-2 border-red-200 dark:border-red-900/50 p-5 hover:border-red-500 dark:hover:border-red-600 hover:shadow-lg hover:shadow-red-500/20 transition-all duration-300 bg-gradient-to-br from-white to-red-50/30 dark:from-slate-800 dark:to-red-950/30"
+                  >
+                    {/* Error Code Header */}
+                    <div className="mb-3">
+                      <h4 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-1">
+                        {error.errorCode}
+                      </h4>
+                      {error.details && (
+                        <div className="space-y-1">
+                          {error.details.error_description && (
+                            <p className="text-sm text-slate-700 dark:text-slate-300">
+                              {error.details.error_description}
+                            </p>
+                          )}
+                          {error.details.description && (
+                            <p className="text-sm text-slate-700 dark:text-slate-300">
+                              {error.details.description}
+                            </p>
+                          )}
+                          {error.details.message && (
+                            <p className="text-sm text-slate-700 dark:text-slate-300">
+                              {error.details.message}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Metric Badges */}
+                    <div className="flex flex-wrap gap-2">
+                      {error.isFrequent && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-full shadow-sm">
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" />
+                          </svg>
+                          High Frequency
+                        </span>
+                      )}
+                      {error.isHighImpact && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-full shadow-sm">
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                          High Impact
+                        </span>
+                      )}
+                      {error.isHighTime && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-full shadow-sm">
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                          </svg>
+                          High Time Cost
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </NarrativeSection>
         </>
       )}
-      
+
 
       {/* Story Section 3: What's Next */}
       <NarrativeSection className="border-4 border-cyan-500 dark:border-cyan-600 bg-gradient-to-br from-cyan-50 to-blue-50 dark:from-cyan-950/30 dark:to-blue-950/30">
@@ -815,9 +1315,15 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
           <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
             Dive Deeper
           </h2>
-          <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+          <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300 mb-6">
             Look at the data for yourself using the table view:
           </p>
+          <Link
+            href="/table"
+            className="inline-block px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white rounded-md font-medium shadow-lg shadow-cyan-500/30 transition-all"
+          >
+            View Tables
+          </Link>
         </div>
       </NarrativeSection>
     </div>

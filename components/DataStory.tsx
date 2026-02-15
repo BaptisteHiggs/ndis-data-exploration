@@ -15,6 +15,10 @@ import {
   Tooltip,
   ResponsiveContainer,
   ZAxis,
+  Cell,
+  PieChart,
+  Pie,
+  Legend,
 } from "recharts";
 import NarrativeSection from "./NarrativeSection";
 
@@ -704,6 +708,204 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
     return {
       correlations: topCorrelations,
       invoiceData: invoiceDataWithScores
+    };
+  }, [sessionsData, data]);
+
+  // Operational metrics calculations
+  const operationalMetrics = useMemo(() => {
+    if (!sessionsData || sessionsData.length === 0 || !data || data.length === 0) {
+      return {
+        intakeLatency: [],
+        humanReviewFriction: [],
+        touchlessRate: { touchless: 0, manual: 0, percentage: 0 },
+        efficiencyKillerData: [],
+      };
+    }
+
+    const invoiceIdCol = Object.keys(sessionsData[0]).find((col) =>
+      col.toLowerCase().includes("invoice") && col.toLowerCase().includes("id")
+    );
+    if (!invoiceIdCol) {
+      return {
+        intakeLatency: [],
+        humanReviewFriction: [],
+        touchlessRate: { touchless: 0, manual: 0, percentage: 0 },
+        efficiencyKillerData: [],
+      };
+    }
+
+    // 1. Intake Latency - time between created_at and first session_started
+    const intakeLatencies: number[] = [];
+    const dataInvoiceIdCol = Object.keys(data[0]).find((col) => col.toLowerCase().includes("id"));
+
+    if (dataInvoiceIdCol) {
+      data.forEach((invoice) => {
+        const invoiceId = invoice[dataInvoiceIdCol];
+        if (!invoiceId || !invoice.created_at) return;
+
+        const invoiceSessions = sessionsData.filter(s => s[invoiceIdCol] === invoiceId);
+        if (invoiceSessions.length === 0) return;
+
+        const firstSession = invoiceSessions.reduce((earliest, session) => {
+          return new Date(session.session_started) < new Date(earliest.session_started) ? session : earliest;
+        });
+
+        const createdAt = new Date(invoice.created_at);
+        const firstSessionStart = new Date(firstSession.session_started);
+        const latencyMinutes = (firstSessionStart.getTime() - createdAt.getTime()) / (1000 * 60);
+
+        if (latencyMinutes >= 0) {
+          intakeLatencies.push(latencyMinutes);
+        }
+      });
+    }
+
+    // Create distribution buckets for intake latency
+    const intakeLatencyDist: Record<string, number> = {
+      "0-5m": 0, "5-15m": 0, "15-30m": 0, "30-60m": 0, "1-2h": 0, "2-6h": 0, "6h+": 0
+    };
+    intakeLatencies.forEach(minutes => {
+      if (minutes < 5) intakeLatencyDist["0-5m"]++;
+      else if (minutes < 15) intakeLatencyDist["5-15m"]++;
+      else if (minutes < 30) intakeLatencyDist["15-30m"]++;
+      else if (minutes < 60) intakeLatencyDist["30-60m"]++;
+      else if (minutes < 120) intakeLatencyDist["1-2h"]++;
+      else if (minutes < 360) intakeLatencyDist["2-6h"]++;
+      else intakeLatencyDist["6h+"]++;
+    });
+
+    const medianLatency = intakeLatencies.length > 0
+      ? intakeLatencies.sort((a, b) => a - b)[Math.floor(intakeLatencies.length / 2)]
+      : 0;
+
+    // 2. Human Review Friction - avg engaged_duration by error presence
+    const withErrors: number[] = [];
+    const withoutErrors: number[] = [];
+
+    if (dataInvoiceIdCol) {
+      data.forEach((invoice) => {
+        const invoiceId = invoice[dataInvoiceIdCol];
+        if (!invoiceId) return;
+
+        let hasErrors = false;
+        if (invoice.state_management) {
+          try {
+            const stateManagement = typeof invoice.state_management === 'string'
+              ? JSON.parse(invoice.state_management)
+              : invoice.state_management;
+            const errors = stateManagement?.errors || [];
+            hasErrors = errors.length > 0;
+          } catch (e) {
+            // Skip
+          }
+        }
+
+        const invoiceSessions = sessionsData.filter(s => s[invoiceIdCol] === invoiceId);
+        const totalEngaged = invoiceSessions.reduce((sum, s) => sum + (s.engaged_duration_seconds || 0), 0);
+
+        if (totalEngaged > 0) {
+          if (hasErrors) {
+            withErrors.push(totalEngaged);
+          } else {
+            withoutErrors.push(totalEngaged);
+          }
+        }
+      });
+    }
+
+    const avgWithErrors = withErrors.length > 0
+      ? withErrors.reduce((a, b) => a + b, 0) / withErrors.length
+      : 0;
+    const avgWithoutErrors = withoutErrors.length > 0
+      ? withoutErrors.reduce((a, b) => a + b, 0) / withoutErrors.length
+      : 0;
+
+    // 3. Touchless Rate - invoices with no errors OR auto_approved
+    let touchlessCount = 0;
+    let manualCount = 0;
+
+    data.forEach((invoice) => {
+      let hasErrors = false;
+      const autoApproved = invoice.auto_approved === true || invoice.auto_approved === 1;
+
+      if (invoice.state_management) {
+        try {
+          const stateManagement = typeof invoice.state_management === 'string'
+            ? JSON.parse(invoice.state_management)
+            : invoice.state_management;
+          const errors = stateManagement?.errors || [];
+          hasErrors = errors.length > 0;
+        } catch (e) {
+          // Skip
+        }
+      }
+
+      if (!hasErrors || autoApproved) {
+        touchlessCount++;
+      } else {
+        manualCount++;
+      }
+    });
+
+    const touchlessPercentage = ((touchlessCount / (touchlessCount + manualCount)) * 100) || 0;
+
+    // 4. Efficiency Killer Bubble Chart Data
+    const efficiencyKillerData: Array<{
+      invoiceId: string;
+      totalDuration: number;
+      sessionCount: number;
+      idleCount: number;
+      hasErrors: boolean;
+    }> = [];
+
+    if (dataInvoiceIdCol) {
+      data.forEach((invoice) => {
+        const invoiceId = invoice[dataInvoiceIdCol];
+        if (!invoiceId) return;
+
+        let hasErrors = false;
+        if (invoice.state_management) {
+          try {
+            const stateManagement = typeof invoice.state_management === 'string'
+              ? JSON.parse(invoice.state_management)
+              : invoice.state_management;
+            const errors = stateManagement?.errors || [];
+            hasErrors = errors.length > 0;
+          } catch (e) {
+            // Skip
+          }
+        }
+
+        const invoiceSessions = sessionsData.filter(s => s[invoiceIdCol] === invoiceId);
+        if (invoiceSessions.length === 0) return;
+
+        const totalDuration = invoiceSessions.reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
+        const sessionCount = invoiceSessions.length;
+        const idleCount = invoiceSessions.reduce((sum, s) => sum + (s.idle_count || 0), 0);
+
+        efficiencyKillerData.push({
+          invoiceId,
+          totalDuration,
+          sessionCount,
+          idleCount,
+          hasErrors,
+        });
+      });
+    }
+
+    return {
+      intakeLatency: Object.entries(intakeLatencyDist).map(([bucket, count]) => ({ bucket, count })),
+      medianLatency,
+      humanReviewFriction: [
+        { category: "With Errors", avgDuration: avgWithErrors / 60 }, // Convert to minutes
+        { category: "Without Errors", avgDuration: avgWithoutErrors / 60 },
+      ],
+      touchlessRate: {
+        touchless: touchlessCount,
+        manual: manualCount,
+        percentage: touchlessPercentage,
+      },
+      efficiencyKillerData: efficiencyKillerData.filter(d => d.totalDuration > 0),
     };
   }, [sessionsData, data]);
 
@@ -1609,6 +1811,197 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
               })}
             </div>
           )}
+
+          <div className="mt-6 prose prose-zinc dark:prose-invert max-w-none">
+            <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400">
+              As we can see, brute-force correlation analysis can only yield so much.
+            </p>
+          </div>
+        </NarrativeSection>
+
+        {/* More Metrics Section */}
+        <NarrativeSection>
+          <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
+              More Metrics
+            </h2>
+            <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+              Here are a few more metrics that may help us to understand the efficiency problem from a different angle:
+            </p>
+          </div>
+
+          {/* 1. Intake Latency Distribution */}
+          <div className="mb-8">
+            <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-blue-200 dark:border-blue-900/50 rounded-lg p-6 shadow-lg">
+              <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-blue-600 to-cyan-600 dark:from-blue-400 dark:to-cyan-400 bg-clip-text text-transparent">
+                1. Intake Latency (Queue Time)
+              </h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">
+                Time between invoice creation and first review session
+              </p>
+              <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-4">
+                Median Wait Time: {operationalMetrics.medianLatency?.toFixed(1) || 0} minutes
+              </p>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={operationalMetrics.intakeLatency} margin={{ top: 5, right: 20, bottom: 5, left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#3b82f6" opacity={0.1} />
+                  <XAxis dataKey="bucket" stroke="#2563eb" />
+                  <YAxis stroke="#2563eb" label={{ value: "Invoice Count", angle: -90, position: "insideLeft" }} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#1e40af",
+                      border: "2px solid #2563eb",
+                      borderRadius: "0.5rem",
+                      color: "#fff",
+                    }}
+                  />
+                  <Bar dataKey="count" fill="url(#intakeGradient)" />
+                  <defs>
+                    <linearGradient id="intakeGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3b82f6" />
+                      <stop offset="100%" stopColor="#1d4ed8" />
+                    </linearGradient>
+                  </defs>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Grid for 2 & 3 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            {/* 2. Human Review Friction */}
+            <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-rose-200 dark:border-rose-900/50 rounded-lg p-6 shadow-lg">
+              <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-rose-600 to-pink-600 dark:from-rose-400 dark:to-pink-400 bg-clip-text text-transparent">
+                2. Human Review Friction
+              </h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+                Average engaged time per invoice by error state
+              </p>
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={operationalMetrics.humanReviewFriction} layout="vertical" margin={{ top: 5, right: 20, bottom: 5, left: 100 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#fb7185" opacity={0.1} />
+                  <XAxis type="number" stroke="#e11d48" label={{ value: "Avg Minutes", position: "insideBottom", offset: -5 }} />
+                  <YAxis type="category" dataKey="category" stroke="#e11d48" width={95} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#881337",
+                      border: "2px solid #e11d48",
+                      borderRadius: "0.5rem",
+                      color: "#fff",
+                    }}
+                    formatter={(value: number) => `${value.toFixed(1)} min`}
+                  />
+                  <Bar dataKey="avgDuration" fill="url(#frictionGradient)" />
+                  <defs>
+                    <linearGradient id="frictionGradient" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="#fb7185" />
+                      <stop offset="100%" stopColor="#e11d48" />
+                    </linearGradient>
+                  </defs>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* 3. Touchless Rate */}
+            <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-emerald-200 dark:border-emerald-900/50 rounded-lg p-6 shadow-lg">
+              <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-emerald-600 to-teal-600 dark:from-emerald-400 dark:to-teal-400 bg-clip-text text-transparent">
+                3. Automation "Touchless" Rate
+              </h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+                Invoices requiring zero human intervention
+              </p>
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: "Touchless", value: operationalMetrics.touchlessRate.touchless, fill: "#10b981" },
+                      { name: "Manual Review", value: operationalMetrics.touchlessRate.manual, fill: "#ef4444" },
+                    ]}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={2}
+                    dataKey="value"
+                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                  />
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="text-center mt-2">
+                <p className="text-3xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 dark:from-emerald-400 dark:to-teal-400 bg-clip-text text-transparent">
+                  {operationalMetrics.touchlessRate.percentage.toFixed(1)}%
+                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-400">Touchless Processing</p>
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Efficiency Killer Bubble Chart */}
+          <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-purple-200 dark:border-purple-900/50 rounded-lg p-6 shadow-lg mb-6">
+            <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-400 dark:to-indigo-400 bg-clip-text text-transparent">
+              4. The "Efficiency Killer" Ranking
+            </h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+              Bubble size = idle interruptions | Color = error presence
+            </p>
+            <ResponsiveContainer width="100%" height={400}>
+              <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 40 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#a855f7" opacity={0.2} />
+                <XAxis
+                  type="number"
+                  dataKey="totalDuration"
+                  name="Total Duration"
+                  stroke="#9333ea"
+                  label={{ value: "Total Processing Time (seconds)", position: "insideBottom", offset: -10 }}
+                />
+                <YAxis
+                  type="number"
+                  dataKey="sessionCount"
+                  name="Fragmentation"
+                  stroke="#9333ea"
+                  label={{ value: "Session Count (Fragmentation)", angle: -90, position: "insideLeft" }}
+                />
+                <ZAxis type="number" dataKey="idleCount" range={[50, 400]} name="Idle Count" />
+                <Tooltip
+                  cursor={{ strokeDasharray: '3 3' }}
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      const data = payload[0].payload;
+                      return (
+                        <div className="bg-purple-900 border-2 border-purple-600 rounded-lg p-3 shadow-xl">
+                          <p className="text-white font-bold text-xs">Invoice #{data.invoiceId}</p>
+                          <p className="text-purple-100 text-xs">Duration: {Math.floor(data.totalDuration / 60)}m {data.totalDuration % 60}s</p>
+                          <p className="text-purple-100 text-xs">Sessions: {data.sessionCount}</p>
+                          <p className="text-purple-100 text-xs">Idle Events: {data.idleCount}</p>
+                          <p className="text-purple-100 text-xs">Errors: {data.hasErrors ? "Yes" : "No"}</p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  }}
+                />
+                <Scatter
+                  name="With Errors"
+                  data={operationalMetrics.efficiencyKillerData.filter(d => d.hasErrors)}
+                  fill="#ef4444"
+                />
+                <Scatter
+                  name="Without Errors"
+                  data={operationalMetrics.efficiencyKillerData.filter(d => !d.hasErrors)}
+                  fill="#22c55e"
+                />
+                <Legend />
+              </ScatterChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="prose prose-zinc dark:prose-invert max-w-none">
+            <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400">
+              These operational metrics pinpoint exactly where manual intervention is concentrated: intake delays, error-heavy reviews, and fragmented workflows with high interruption rates.
+            </p>
+          </div>
         </NarrativeSection>
         </>
       )}

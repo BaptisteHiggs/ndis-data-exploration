@@ -26,10 +26,11 @@ interface DataStoryProps {
   data: any[];
   sessionsData: any[];
   errorsData: any[];
+  lineItemsData: any[];
   tables: string[];
 }
 
-export default function DataStory({ data, sessionsData, errorsData, tables }: DataStoryProps) {
+export default function DataStory({ data, sessionsData, errorsData, lineItemsData, tables }: DataStoryProps) {
   // Sample aggregations for storytelling
   const invoiceStats = useMemo(() => {
     if (!data || data.length === 0) return null;
@@ -719,6 +720,7 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
         humanReviewFriction: [],
         touchlessRate: { touchless: 0, manual: 0, percentage: 0 },
         efficiencyKillerData: [],
+        reconciliationOverTime: [],
       };
     }
 
@@ -731,6 +733,7 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
         humanReviewFriction: [],
         touchlessRate: { touchless: 0, manual: 0, percentage: 0 },
         efficiencyKillerData: [],
+        reconciliationOverTime: [],
       };
     }
 
@@ -893,6 +896,40 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
       });
     }
 
+    // 5. Reconciliation Success Rate - group by created_at month and reconciliation_status
+    const reconciliationOverTime: Array<{ month: string; Reconciled: number; Pending: number; Failed: number; [key: string]: string | number }> = [];
+
+    if (lineItemsData && lineItemsData.length > 0) {
+      const monthlyReconciliation: Record<string, Record<string, number>> = {};
+
+      lineItemsData.forEach((item) => {
+        if (!item.created_at) return;
+
+        const date = new Date(item.created_at);
+        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+        if (!monthlyReconciliation[monthKey]) {
+          monthlyReconciliation[monthKey] = {};
+        }
+
+        const status = item.reconciliation_status || "Unknown";
+        monthlyReconciliation[monthKey][status] = (monthlyReconciliation[monthKey][status] || 0) + 1;
+      });
+
+      // Convert to array format for stacked bar chart
+      Object.entries(monthlyReconciliation)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .forEach(([month, statuses]) => {
+          reconciliationOverTime.push({
+            month,
+            Reconciled: statuses["Reconciled"] || 0,
+            Pending: statuses["Pending"] || 0,
+            Failed: statuses["Failed"] || 0,
+            ...statuses, // Include any other status types
+          });
+        });
+    }
+
     return {
       intakeLatency: Object.entries(intakeLatencyDist).map(([bucket, count]) => ({ bucket, count })),
       medianLatency,
@@ -906,8 +943,9 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
         percentage: touchlessPercentage,
       },
       efficiencyKillerData: efficiencyKillerData.filter(d => d.totalDuration > 0),
+      reconciliationOverTime,
     };
-  }, [sessionsData, data]);
+  }, [sessionsData, data, lineItemsData]);
 
   return (
     <div className="space-y-8">
@@ -1923,7 +1961,7 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
                     outerRadius={90}
                     paddingAngle={2}
                     dataKey="value"
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    label={({ name, percent }) => `${name}: ${((percent ?? 0) * 100).toFixed(0)}%`}
                   />
                   <Tooltip />
                   <Legend />
@@ -1938,69 +1976,34 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
             </div>
           </div>
 
-          {/* 4. Efficiency Killer Bubble Chart */}
-          <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-purple-200 dark:border-purple-900/50 rounded-lg p-6 shadow-lg mb-6">
-            <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-400 dark:to-indigo-400 bg-clip-text text-transparent">
-              4. The "Efficiency Killer" Ranking
-            </h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-              Bubble size = idle interruptions | Color = error presence
-            </p>
-            <ResponsiveContainer width="100%" height={400}>
-              <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 40 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#a855f7" opacity={0.2} />
-                <XAxis
-                  type="number"
-                  dataKey="totalDuration"
-                  name="Total Duration"
-                  stroke="#9333ea"
-                  label={{ value: "Total Processing Time (seconds)", position: "insideBottom", offset: -10 }}
-                />
-                <YAxis
-                  type="number"
-                  dataKey="sessionCount"
-                  name="Fragmentation"
-                  stroke="#9333ea"
-                  label={{ value: "Session Count (Fragmentation)", angle: -90, position: "insideLeft" }}
-                />
-                <ZAxis type="number" dataKey="idleCount" range={[50, 400]} name="Idle Count" />
-                <Tooltip
-                  cursor={{ strokeDasharray: '3 3' }}
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const data = payload[0].payload;
-                      return (
-                        <div className="bg-purple-900 border-2 border-purple-600 rounded-lg p-3 shadow-xl">
-                          <p className="text-white font-bold text-xs">Invoice #{data.invoiceId}</p>
-                          <p className="text-purple-100 text-xs">Duration: {Math.floor(data.totalDuration / 60)}m {data.totalDuration % 60}s</p>
-                          <p className="text-purple-100 text-xs">Sessions: {data.sessionCount}</p>
-                          <p className="text-purple-100 text-xs">Idle Events: {data.idleCount}</p>
-                          <p className="text-purple-100 text-xs">Errors: {data.hasErrors ? "Yes" : "No"}</p>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Scatter
-                  name="With Errors"
-                  data={operationalMetrics.efficiencyKillerData.filter(d => d.hasErrors)}
-                  fill="#ef4444"
-                />
-                <Scatter
-                  name="Without Errors"
-                  data={operationalMetrics.efficiencyKillerData.filter(d => !d.hasErrors)}
-                  fill="#22c55e"
-                />
-                <Legend />
-              </ScatterChart>
-            </ResponsiveContainer>
-          </div>
+          {/* Analysis Headline Sections */}
+          <div className="space-y-6 mt-8">
+            <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/30 rounded-lg p-6 border-l-4 border-blue-500">
+              <h4 className="text-lg font-semibold text-blue-900 dark:text-blue-300 mb-2">
+                📊 Intake Latency Insights
+              </h4>
+              <p className="text-slate-700 dark:text-slate-300 text-sm">
+                The median wait time identifies intake bottlenecks. If the latency is high, it either shows that there's some other process reducing efficiency, or it might be just that the items are created by someone else.
+              </p>
+            </div>
 
-          <div className="prose prose-zinc dark:prose-invert max-w-none">
-            <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400">
-              These operational metrics pinpoint exactly where manual intervention is concentrated: intake delays, error-heavy reviews, and fragmented workflows with high interruption rates.
-            </p>
+            <div className="bg-gradient-to-r from-rose-50 to-pink-50 dark:from-rose-950/30 dark:to-pink-950/30 rounded-lg p-6 border-l-4 border-rose-500">
+              <h4 className="text-lg font-semibold text-rose-900 dark:text-rose-300 mb-2">
+                ⚠️ Error Impact on Review Time
+              </h4>
+              <p className="text-slate-700 dark:text-slate-300 text-sm">
+                You would expect that errors would increase the time spent on human review, but it seems to be inversely correlated (or more likely, just not that relevant!).
+              </p>
+            </div>
+
+            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 rounded-lg p-6 border-l-4 border-emerald-500">
+              <h4 className="text-lg font-semibold text-emerald-900 dark:text-emerald-300 mb-2">
+                🎯 Automation Success Metrics
+              </h4>
+              <p className="text-slate-700 dark:text-slate-300 text-sm">
+                Human intervention is a key driver of inefficiency, so the touchless rate is a critical metric. Having said that—it seems that touchless processing seems to still be taking up a bit of human time.
+              </p>
+            </div>
           </div>
         </NarrativeSection>
         </>

@@ -66,10 +66,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Fetch data from ndis_line_items for reconciliation analysis
+    const { data: lineItemsData, error: lineItemsError } = await supabase
+      .from("ndis_line_items")
+      .select("*")
+      .limit(1000); // Limit for performance
+
+    if (lineItemsError) {
+      return NextResponse.json(
+        { error: `Failed to fetch line items data: ${lineItemsError.message}` },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       data: invoicesData || [],
       sessionsData: sessionsData || [],
       errorsData: errorsData || [],
+      lineItemsData: lineItemsData || [],
       rowCount: invoicesData?.length || 0,
     });
   } catch (error) {

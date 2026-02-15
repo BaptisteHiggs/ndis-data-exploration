@@ -14,6 +14,7 @@ export default function Home() {
   const [data, setData] = useState<any[]>([]);
   const [sessionsData, setSessionsData] = useState<any[]>([]);
   const [errorsData, setErrorsData] = useState<any[]>([]);
+  const [lineItemsData, setLineItemsData] = useState<any[]>([]);
   const [tables, setTables] = useState<string[]>([]);
 
   useEffect(() => {
@@ -56,6 +57,7 @@ export default function Home() {
           setData(dataResult.data || []);
           setSessionsData(dataResult.sessionsData || []);
           setErrorsData(dataResult.errorsData || []);
+          setLineItemsData(dataResult.lineItemsData || []);
           setTables(tablesResult.tables || []);
         }
       } catch (err) {
@@ -80,7 +82,7 @@ export default function Home() {
         <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border-b-4 border-cyan-500 dark:border-cyan-600 rounded-lg shadow-xl p-6 mb-4">
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent">
-              NDIS Data Story
+              NDIS Invoice Analytics Dashboard
             </h1>
             <div className="flex gap-3">
               <Link
@@ -110,7 +112,7 @@ export default function Home() {
         {error && !loading && <ErrorDisplay message={error} />}
 
         {/* Data Story */}
-        {!loading && !error && <DataStory data={data} sessionsData={sessionsData} errorsData={errorsData} tables={tables} />}
+        {!loading && !error && <DataStory data={data} sessionsData={sessionsData} errorsData={errorsData} lineItemsData={lineItemsData} tables={tables} />}
       </div>
     </div>
   );

@@ -326,7 +326,7 @@ export default function DataStory({ data, tables }: DataStoryProps) {
 
           <div className="mt-6 prose prose-zinc dark:prose-invert max-w-none">
             <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400">
-              Generally, invoices are small (under $1k), and most participants only have 1 invoice. But there are some big outliers—participants with many invoices, and some very high-value invoices.
+              Most invoices are small (under $300), and most participants only have 1 invoice. But there are some big outliers—participants with many invoices, and some very high-value invoices.
             </p>
           </div>
         </NarrativeSection>
@@ -336,10 +336,11 @@ export default function DataStory({ data, tables }: DataStoryProps) {
               Invoices
             </h2>
             <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
-              The same is true for invoice management.
-
+              The same is true for invoice management:
             </p>
           </div>
+
+            {/*  */}
 
           <div className="mt-6 prose prose-zinc dark:prose-invert max-w-none">
             <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400">

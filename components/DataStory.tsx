@@ -1084,7 +1084,7 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
                 <div className="flex items-center gap-2.5">
                   <span className="font-semibold text-slate-800 dark:text-slate-200 text-base">Score =</span>
                   <span className="text-cyan-600 dark:text-cyan-400 font-medium">normalised(</span>
-                  <span className="text-slate-700 dark:text-slate-300 italic">total</span>
+                  <span className="text-slate-700 dark:text-slate-300 italic">active time</span>
                   <span className="text-cyan-600 dark:text-cyan-400 font-medium">)</span>
                   <span className="text-slate-600 dark:text-slate-400">×</span>
                   <span className="font-bold text-cyan-600 dark:text-cyan-400">0.5</span>
@@ -1092,7 +1092,7 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
                 <div className="flex items-center gap-2.5">
                   <span className="text-slate-500 dark:text-slate-400 text-xl">+</span>
                   <span className="text-blue-600 dark:text-blue-400 font-medium">normalised(</span>
-                  <span className="text-slate-700 dark:text-slate-300 italic">sessions</span>
+                  <span className="text-slate-700 dark:text-slate-300 italic">session count</span>
                   <span className="text-blue-600 dark:text-blue-400 font-medium">)</span>
                   <span className="text-slate-600 dark:text-slate-400">×</span>
                   <span className="font-bold text-blue-600 dark:text-blue-400">0.2</span>

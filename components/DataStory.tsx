@@ -843,7 +843,7 @@ export default function DataStory({ data, sessionsData, errorsData, lineItemsDat
         }
       }
 
-      if (!hasErrors || autoApproved) {
+      if (autoApproved) {
         touchlessCount++;
       } else {
         manualCount++;
@@ -2001,7 +2001,7 @@ export default function DataStory({ data, sessionsData, errorsData, lineItemsDat
                 🎯 Automation Success Metrics
               </h4>
               <p className="text-slate-700 dark:text-slate-300 text-sm">
-                Human intervention is a key driver of inefficiency, so the touchless rate is a critical metric. Having said that—it seems that touchless processing seems to still be taking up a bit of human time.
+                Human intervention is a key driver of inefficiency, so the touchless rate is a critical metric. Having said that—it seems that there are very few invoices that are being registered as fully automated.
               </p>
             </div>
           </div>

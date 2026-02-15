@@ -7,11 +7,14 @@ import {
   Bar,
   LineChart,
   Line,
+  ScatterChart,
+  Scatter,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  ZAxis,
 } from "recharts";
 import NarrativeSection from "./NarrativeSection";
 
@@ -70,7 +73,6 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
     if (!dateCol) return [];
 
     const monthCounts: Record<string, number> = {};
-    console.log("DATA:", data)
     data.forEach((row) => {
       if (row[dateCol]) {
         const date = new Date(row[dateCol]);
@@ -557,6 +559,153 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
       };
     });
   }, [errorFrequency, avgScoreByError, cumulativeTimeByError, errorsData]);
+
+  // Correlation analysis - find which metrics correlate with efficiency
+  const correlationAnalysis = useMemo(() => {
+    if (!sessionsData || sessionsData.length === 0 || !data || data.length === 0) return { correlations: [], invoiceData: [] };
+
+    // First, calculate efficiency scores for all invoices (similar to topEfficiencyScores but keep all)
+    const invoiceIdCol = Object.keys(sessionsData[0]).find((col) =>
+      col.toLowerCase().includes("invoice") && col.toLowerCase().includes("id")
+    );
+    if (!invoiceIdCol) return { correlations: [], invoiceData: [] };
+
+    const invoiceMetrics: Record<string, any> = {};
+
+    // Aggregate session data per invoice
+    sessionsData.forEach((row) => {
+      const invoiceId = row[invoiceIdCol];
+      if (!invoiceId) return;
+
+      if (!invoiceMetrics[invoiceId]) {
+        invoiceMetrics[invoiceId] = {
+          activeTime: 0,
+          sessionCount: 0,
+          errorCodes: [],
+          ignoredErrorCodes: [],
+          idle_count: 0,
+        };
+      }
+
+      // Aggregate specific numeric values from sessions (excluding duration metrics)
+      invoiceMetrics[invoiceId].activeTime += row.active_duration_seconds || 0;
+      invoiceMetrics[invoiceId].sessionCount += 1;
+      invoiceMetrics[invoiceId].idle_count = (invoiceMetrics[invoiceId].idle_count || 0) + (row.idle_count || 0);
+    });
+
+    // Add invoice data
+    const dataInvoiceIdCol = Object.keys(data[0]).find((col) =>
+      col.toLowerCase().includes("id")
+    );
+
+    if (dataInvoiceIdCol) {
+      data.forEach((row) => {
+        const invoiceId = row[dataInvoiceIdCol];
+        if (!invoiceId || !invoiceMetrics[invoiceId]) return;
+
+        // Add all invoice columns (numeric and boolean)
+        Object.keys(row).forEach(key => {
+          const value = row[key];
+
+          // Include numeric columns
+          if (typeof value === 'number' && key !== dataInvoiceIdCol) {
+            invoiceMetrics[invoiceId][key] = value;
+          }
+
+          // Convert boolean columns to 0/1 for correlation
+          if (typeof value === 'boolean') {
+            invoiceMetrics[invoiceId][key] = value ? 1 : 0;
+          }
+        });
+
+        // Parse errors
+        if (row.state_management) {
+          try {
+            const stateManagement = typeof row.state_management === 'string'
+              ? JSON.parse(row.state_management)
+              : row.state_management;
+            invoiceMetrics[invoiceId].errorCodes = stateManagement?.errors || [];
+            invoiceMetrics[invoiceId].ignoredErrorCodes = stateManagement?.ignored_errors || [];
+          } catch (e) {
+            // Skip if JSON parsing fails
+          }
+        }
+      });
+    }
+
+    // Calculate efficiency scores
+    const invoiceEntries = Object.entries(invoiceMetrics);
+    const values = invoiceEntries.map(([, metrics]) => metrics);
+    const maxActiveTime = Math.max(...values.map(v => v.activeTime || 0));
+    const maxSessions = Math.max(...values.map(v => v.sessionCount || 0));
+    const maxErrors = Math.max(...values.map(v => (v.errorCodes?.length || 0)));
+    const maxIgnoredErrors = Math.max(...values.map(v => (v.ignoredErrorCodes?.length || 0)));
+
+    const invoiceDataWithScores = invoiceEntries.map(([invoiceId, metrics]) => {
+      const normActiveTime = maxActiveTime > 0 ? (metrics.activeTime || 0) / maxActiveTime : 0;
+      const normSessions = maxSessions > 0 ? (metrics.sessionCount || 0) / maxSessions : 0;
+      const normErrors = maxErrors > 0 ? (metrics.errorCodes?.length || 0) / maxErrors : 0;
+      const normIgnoredErrors = maxIgnoredErrors > 0 ? (metrics.ignoredErrorCodes?.length || 0) / maxIgnoredErrors : 0;
+      const efficiencyScore = normActiveTime * 0.5 + normSessions * 0.2 + normErrors * 0.2 + normIgnoredErrors * 0.1;
+
+      return {
+        invoiceId,
+        efficiencyScore,
+        ...metrics
+      };
+    });
+
+    // Calculate correlations for all numeric columns
+    const scores = invoiceDataWithScores.map(d => d.efficiencyScore);
+    const scoreMean = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const scoreStdDev = Math.sqrt(scores.reduce((sum, s) => sum + Math.pow(s - scoreMean, 2), 0) / scores.length);
+
+    const correlations: Array<{ metric: string; correlation: number; values: number[] }> = [];
+
+    // Get all numeric columns
+    if (invoiceDataWithScores.length > 0) {
+      const sampleInvoice = invoiceDataWithScores[0];
+      Object.keys(sampleInvoice).forEach(key => {
+        // Skip non-numeric, IDs, and already-included metrics
+        if (key === 'invoiceId' || key === 'efficiencyScore' || key === 'activeTime' ||
+            key === 'sessionCount' || key === 'errorCodes' || key === 'ignoredErrorCodes' ||
+            key.toLowerCase().includes('id') || key.toLowerCase().includes('date')) {
+          return;
+        }
+
+        const values = invoiceDataWithScores.map(d => {
+          const val = d[key];
+          return typeof val === 'number' ? val : 0;
+        });
+
+        // Check if there's variation in the data
+        const uniqueValues = new Set(values);
+        if (uniqueValues.size < 2) return; // Skip if all same value
+
+        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+        const stdDev = Math.sqrt(values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length);
+
+        if (stdDev === 0 || scoreStdDev === 0) return; // Skip if no variation
+
+        // Calculate Pearson correlation
+        const correlation = values.reduce((sum, v, i) => {
+          return sum + ((v - mean) * (scores[i] - scoreMean));
+        }, 0) / (values.length * stdDev * scoreStdDev);
+
+        correlations.push({ metric: key, correlation, values });
+      });
+    }
+
+    // Sort by absolute correlation and take top 10
+    const topCorrelations = correlations
+      .sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation))
+      .slice(0, 10);
+
+    return {
+      correlations: topCorrelations,
+      invoiceData: invoiceDataWithScores
+    };
+  }, [sessionsData, data]);
 
   return (
     <div className="space-y-8">
@@ -1305,6 +1454,162 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
             </div>
           )}
         </NarrativeSection>
+
+        {/* Correlation Analysis Section */}
+        <NarrativeSection>
+          <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
+              Beyond Errors
+            </h2>
+            <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+              Even though errors are included in the metric, it seems that there must be another factor contributing to low efficiency. Let's explore which other factors correlate most strongly with poor efficiency scores:
+            </p>
+          </div>
+
+          {/* Correlation Bar Chart */}
+          {correlationAnalysis.correlations.length > 0 && (
+            <div className="mb-8">
+              <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-purple-200 dark:border-purple-900/50 rounded-lg p-6 shadow-lg">
+                <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-400 dark:to-indigo-400 bg-clip-text text-transparent">
+                  Top Correlated Metrics
+                </h3>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+                  Correlation coefficient: -1 (perfect negative) to +1 (perfect positive)
+                </p>
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={correlationAnalysis.correlations} layout="vertical" margin={{ top: 5, right: 30, bottom: 5, left: 120 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#a855f7" opacity={0.1} />
+                    <XAxis type="number" domain={[-1, 1]} stroke="#9333ea" />
+                    <YAxis
+                      type="category"
+                      dataKey="metric"
+                      stroke="#9333ea"
+                      width={115}
+                      tick={{ fontSize: 11 }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#7e22ce",
+                        border: "2px solid #9333ea",
+                        borderRadius: "0.5rem",
+                        color: "#fff",
+                      }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div className="bg-purple-900 border-2 border-purple-600 rounded-lg p-3 shadow-xl">
+                              <p className="font-bold text-white mb-1">{data.metric}</p>
+                              <p className="text-purple-100 text-sm">
+                                Correlation: {data.correlation.toFixed(3)}
+                              </p>
+                              <p className="text-purple-200 text-xs mt-1">
+                                {Math.abs(data.correlation) > 0.7 ? "Strong" :
+                                 Math.abs(data.correlation) > 0.4 ? "Moderate" : "Weak"} {
+                                 data.correlation > 0 ? "positive" : "negative"} correlation
+                              </p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar dataKey="correlation" fill="url(#colorGradientCorr)" />
+                    <defs>
+                      <linearGradient id="colorGradientCorr" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="#dc2626" />
+                        <stop offset="50%" stopColor="#9333ea" />
+                        <stop offset="100%" stopColor="#22c55e" />
+                      </linearGradient>
+                    </defs>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Scatter Plots for Top Metrics */}
+          {correlationAnalysis.correlations.length > 0 && correlationAnalysis.invoiceData.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {correlationAnalysis.correlations.slice(0, 4).map((corr, idx) => {
+                const scatterData = correlationAnalysis.invoiceData
+                  .map(invoice => ({
+                    x: invoice[corr.metric],
+                    y: invoice.efficiencyScore,
+                  }))
+                  .filter(d => typeof d.x === 'number' && typeof d.y === 'number');
+
+                const gradients = [
+                  { id: 'scatter1', from: '#f97316', to: '#ea580c' },
+                  { id: 'scatter2', from: '#8b5cf6', to: '#7c3aed' },
+                  { id: 'scatter3', from: '#06b6d4', to: '#0891b2' },
+                  { id: 'scatter4', from: '#ec4899', to: '#db2777' },
+                ];
+                const gradient = gradients[idx];
+
+                return (
+                  <div
+                    key={corr.metric}
+                    className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-indigo-200 dark:border-indigo-900/50 rounded-lg p-6 shadow-lg"
+                  >
+                    <h4 className="text-base font-semibold mb-2 bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">
+                      {corr.metric}
+                    </h4>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mb-3">
+                      Correlation: {corr.correlation.toFixed(3)} ({Math.abs(corr.correlation) > 0.7 ? "Strong" :
+                       Math.abs(corr.correlation) > 0.4 ? "Moderate" : "Weak"})
+                    </p>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <ScatterChart margin={{ top: 10, right: 20, bottom: 20, left: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#c4b5fd" opacity={0.2} />
+                        <XAxis
+                          type="number"
+                          dataKey="x"
+                          name={corr.metric}
+                          stroke="#6366f1"
+                          tick={{ fontSize: 10 }}
+                          label={{ value: corr.metric, position: "insideBottom", offset: -10, fontSize: 10, fill: "#6366f1" }}
+                        />
+                        <YAxis
+                          type="number"
+                          dataKey="y"
+                          name="Score"
+                          stroke="#6366f1"
+                          tick={{ fontSize: 10 }}
+                          label={{ value: "Efficiency Score", angle: -90, position: "insideLeft", fontSize: 10, fill: "#6366f1" }}
+                        />
+                        <ZAxis range={[60, 60]} />
+                        <Tooltip
+                          cursor={{ strokeDasharray: '3 3' }}
+                          contentStyle={{
+                            backgroundColor: "#4338ca",
+                            border: "2px solid #6366f1",
+                            borderRadius: "0.5rem",
+                            color: "#fff",
+                            fontSize: "12px",
+                          }}
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div className="bg-indigo-900 border-2 border-indigo-600 rounded-lg p-2 shadow-xl">
+                                  <p className="text-indigo-100 text-xs">{corr.metric}: {data.x?.toFixed(2)}</p>
+                                  <p className="text-indigo-100 text-xs">Score: {data.y?.toFixed(3)}</p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Scatter name="Invoices" data={scatterData} fill={gradient.from} />
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </NarrativeSection>
         </>
       )}
 
@@ -1316,7 +1621,7 @@ export default function DataStory({ data, sessionsData, errorsData, tables }: Da
             Dive Deeper
           </h2>
           <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300 mb-6">
-            Look at the data for yourself using the table view:
+            There's definitely still more to explore in the data. Look at the data for yourself using the table view:
           </p>
           <Link
             href="/table"

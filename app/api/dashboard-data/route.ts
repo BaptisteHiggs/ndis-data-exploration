@@ -53,9 +53,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Fetch data from invoice_error_catalogue for error analysis
+    const { data: errorsData, error: errorsError } = await supabase
+      .from("invoice_error_catalogue")
+      .select("*")
+      .limit(1000); // Limit for performance
+
+    if (errorsError) {
+      return NextResponse.json(
+        { error: `Failed to fetch errors data: ${errorsError.message}` },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       data: invoicesData || [],
       sessionsData: sessionsData || [],
+      errorsData: errorsData || [],
       rowCount: invoicesData?.length || 0,
     });
   } catch (error) {

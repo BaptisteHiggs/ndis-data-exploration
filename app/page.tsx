@@ -13,6 +13,7 @@ export default function Home() {
   const [error, setError] = useState<string>("");
   const [data, setData] = useState<any[]>([]);
   const [sessionsData, setSessionsData] = useState<any[]>([]);
+  const [errorsData, setErrorsData] = useState<any[]>([]);
   const [tables, setTables] = useState<string[]>([]);
 
   useEffect(() => {
@@ -54,6 +55,7 @@ export default function Home() {
         } else {
           setData(dataResult.data || []);
           setSessionsData(dataResult.sessionsData || []);
+          setErrorsData(dataResult.errorsData || []);
           setTables(tablesResult.tables || []);
         }
       } catch (err) {
@@ -108,7 +110,7 @@ export default function Home() {
         {error && !loading && <ErrorDisplay message={error} />}
 
         {/* Data Story */}
-        {!loading && !error && <DataStory data={data} sessionsData={sessionsData} tables={tables} />}
+        {!loading && !error && <DataStory data={data} sessionsData={sessionsData} errorsData={errorsData} tables={tables} />}
       </div>
     </div>
   );

@@ -17,10 +17,11 @@ import NarrativeSection from "./NarrativeSection";
 interface DataStoryProps {
   data: any[];
   sessionsData: any[];
+  errorsData: any[];
   tables: string[];
 }
 
-export default function DataStory({ data, sessionsData, tables }: DataStoryProps) {
+export default function DataStory({ data, sessionsData, errorsData, tables }: DataStoryProps) {
   // Sample aggregations for storytelling
   const invoiceStats = useMemo(() => {
     if (!data || data.length === 0) return null;
@@ -237,6 +238,97 @@ export default function DataStory({ data, sessionsData, tables }: DataStoryProps
       .filter((bucket) => distribution[bucket])
       .map((bucket) => ({ bucket, count: distribution[bucket] }));
   }, [sessionsData]);
+
+  // Efficiency score calculation - Top 100 individual invoices
+  const topEfficiencyScores = useMemo(() => {
+    if (!sessionsData || sessionsData.length === 0 || !data || data.length === 0) return [];
+
+    // Find relevant columns
+    const invoiceIdCol = Object.keys(sessionsData[0]).find((col) =>
+      col.toLowerCase().includes("invoice") && col.toLowerCase().includes("id")
+    );
+    if (!invoiceIdCol) return [];
+
+    // Aggregate data per invoice
+    const invoiceMetrics: Record<string, { activeTime: number; sessionCount: number; errorCodes: string[] }> = {};
+
+    // Sum active duration and count sessions per invoice
+    sessionsData.forEach((row) => {
+      const invoiceId = row[invoiceIdCol];
+      if (!invoiceId) return;
+
+      if (!invoiceMetrics[invoiceId]) {
+        invoiceMetrics[invoiceId] = { activeTime: 0, sessionCount: 0, errorCodes: [] };
+      }
+
+      invoiceMetrics[invoiceId].activeTime += row.active_duration_seconds || 0;
+      invoiceMetrics[invoiceId].sessionCount += 1;
+    });
+
+    // Extract error codes from ndis_invoices state_management column
+    const dataInvoiceIdCol = Object.keys(data[0]).find((col) =>
+      col.toLowerCase().includes("invoice") && col.toLowerCase().includes("id")
+    );
+
+    if (dataInvoiceIdCol) {
+      data.forEach((row) => {
+        const invoiceId = row[dataInvoiceIdCol];
+        if (!invoiceId) return;
+
+        // Parse state_management JSON to get errors (not ignored_errors)
+        if (row.state_management) {
+          try {
+            const stateManagement = typeof row.state_management === 'string'
+              ? JSON.parse(row.state_management)
+              : row.state_management;
+
+            const errors = stateManagement?.errors || [];
+
+            if (errors.length > 0) {
+              if (!invoiceMetrics[invoiceId]) {
+                invoiceMetrics[invoiceId] = { activeTime: 0, sessionCount: 0, errorCodes: [] };
+              }
+              invoiceMetrics[invoiceId].errorCodes = errors;
+            }
+          } catch (e) {
+            // Skip if JSON parsing fails
+          }
+        }
+      });
+    }
+
+    // Extract values for normalization
+    const invoiceEntries = Object.entries(invoiceMetrics);
+    if (invoiceEntries.length === 0) return [];
+
+    const values = invoiceEntries.map(([, metrics]) => metrics);
+    const maxActiveTime = Math.max(...values.map(v => v.activeTime));
+    const maxSessions = Math.max(...values.map(v => v.sessionCount));
+    const maxErrors = Math.max(...values.map(v => v.errorCodes.length));
+
+    // Calculate efficiency scores for each invoice
+    const invoiceScores = invoiceEntries.map(([invoiceId, metrics]) => {
+      const normActiveTime = maxActiveTime > 0 ? metrics.activeTime / maxActiveTime : 0;
+      const normSessions = maxSessions > 0 ? metrics.sessionCount / maxSessions : 0;
+      const normErrors = maxErrors > 0 ? metrics.errorCodes.length / maxErrors : 0;
+
+      const score = normActiveTime * 0.6 + normSessions * 0.2 + normErrors * 0.2;
+
+      return {
+        invoiceId,
+        score,
+        activeTime: metrics.activeTime,
+        sessionCount: metrics.sessionCount,
+        errorCodes: metrics.errorCodes,
+      };
+    });
+
+    // Sort by score descending (worst first) and take top 100
+    return invoiceScores
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 100)
+      .map((item, index) => ({ ...item, index: index + 1 }));
+  }, [sessionsData, data]);
 
   return (
     <div className="space-y-8">
@@ -571,8 +663,151 @@ export default function DataStory({ data, sessionsData, tables }: DataStoryProps
             </div>
           )}
         </NarrativeSection>
+
+        {/* Sessions per Invoice Section */}
+        <NarrativeSection>
+          <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
+              What makes a bad invoice experience?
+            </h2>
+            <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300 mb-4">
+              As a proxy of invoice efficiency, let's take into consideration, in order of importance:
+            </p>
+
+            <ul className="space-y-3 mb-6 ml-4">
+              <li className="flex items-start gap-3">
+                <span className="flex-shrink-0 w-2 h-2 mt-2.5 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500"></span>
+                <span className="text-lg text-slate-700 dark:text-slate-300">
+                  Total <span className="italic font-medium">active</span> time spent on the invoice
+                </span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="flex-shrink-0 w-2 h-2 mt-2.5 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500"></span>
+                <span className="text-lg text-slate-700 dark:text-slate-300">
+                  Number of sessions
+                </span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="flex-shrink-0 w-2 h-2 mt-2.5 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500"></span>
+                <span className="text-lg text-slate-700 dark:text-slate-300">
+                  Number of unignored errors
+                </span>
+              </li>
+            </ul>
+
+            {/* Aesthetic Equation */}
+            <div className="mt-8 p-6 bg-gradient-to-r from-cyan-50 to-blue-50 dark:from-cyan-950/30 dark:to-blue-950/30 rounded-lg border-2 border-cyan-200 dark:border-cyan-800 shadow-lg">
+              <div className="flex items-center justify-center flex-wrap gap-2.5 font-mono text-lg">
+                <span className="font-semibold text-slate-800 dark:text-slate-200 text-base">Score =</span>
+                <span className="text-cyan-600 dark:text-cyan-400 font-medium">normalised(</span>
+                <span className="text-slate-700 dark:text-slate-300 italic">total</span>
+                <span className="text-cyan-600 dark:text-cyan-400 font-medium">)</span>
+                <span className="text-slate-600 dark:text-slate-400">×</span>
+                <span className="font-bold text-cyan-600 dark:text-cyan-400">0.6</span>
+                <span className="text-slate-500 dark:text-slate-400 text-xl">+</span>
+                <span className="text-blue-600 dark:text-blue-400 font-medium">normalised(</span>
+                <span className="text-slate-700 dark:text-slate-300 italic">sessions</span>
+                <span className="text-blue-600 dark:text-blue-400 font-medium">)</span>
+                <span className="text-slate-600 dark:text-slate-400">×</span>
+                <span className="font-bold text-blue-600 dark:text-blue-400">0.2</span>
+                <span className="text-slate-500 dark:text-slate-400 text-xl">+</span>
+                <span className="text-indigo-600 dark:text-indigo-400 font-medium">normalised(</span>
+                <span className="text-slate-700 dark:text-slate-300 italic">errors</span>
+                <span className="text-indigo-600 dark:text-indigo-400 font-medium">)</span>
+                <span className="text-slate-600 dark:text-slate-400">×</span>
+                <span className="font-bold text-indigo-600 dark:text-indigo-400">0.2</span>
+              </div>
+            </div>
+            <br />
+            <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+              Let's use this equation to identify the worst invoices, and see what they have in common:
+            </p>
+          </div>
+
+        </NarrativeSection>
+
+        <NarrativeSection>
+          <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
+              Invoice Efficiency Scores
+            </h2>
+            <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+              Using our efficiency formula, here are the top 100 worst-performing invoices (higher score = worse experience). Hover over each bar for details:
+            </p>
+          </div>
+
+          {/* Efficiency Score Chart */}
+          {topEfficiencyScores.length > 0 && (
+            <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-red-200 dark:border-red-900/50 rounded-lg p-6 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-red-600 to-orange-600 dark:from-red-400 dark:to-orange-400 bg-clip-text text-transparent">
+                Top 100 Problem Invoices
+              </h3>
+              <ResponsiveContainer width="100%" height={400}>
+                <BarChart data={topEfficiencyScores} margin={{ top: 5, right: 5, bottom: 20, left: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ef4444" opacity={0.1} />
+                  <XAxis
+                    dataKey="index"
+                    stroke="#dc2626"
+                    tick={false}
+                    label={{ value: "Invoice Rank (1 = Worst)", position: "insideBottom", offset: -10, fill: "#dc2626" }}
+                  />
+                  <YAxis
+                    stroke="#dc2626"
+                    label={{ value: "Efficiency Score", angle: -90, position: "insideLeft", fill: "#dc2626" }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#991b1b",
+                      border: "2px solid #dc2626",
+                      borderRadius: "0.5rem",
+                      color: "#fff",
+                    }}
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-red-900 border-2 border-red-600 rounded-lg p-4 shadow-xl max-w-xs">
+                            <p className="font-bold text-white mb-2">Invoice #{data.invoiceId}</p>
+                            <p className="text-red-100 text-sm">Rank: #{data.index} of {topEfficiencyScores.length}</p>
+                            <p className="text-red-100 text-sm">Score: {data.score.toFixed(3)}</p>
+                            <hr className="my-2 border-red-700" />
+                            <p className="text-red-100 text-sm">Active Time: {Math.floor(data.activeTime / 60)}m {data.activeTime % 60}s</p>
+                            <p className="text-red-100 text-sm">Sessions: {data.sessionCount}</p>
+                            {data.errorCodes && data.errorCodes.length > 0 ? (
+                              <div className="text-red-100 text-sm mt-1">
+                                <p className="font-medium">Errors:</p>
+                                <p className="ml-2">{data.errorCodes.join(", ")}</p>
+                              </div>
+                            ) : (
+                              <p className="text-red-100 text-sm">Errors: None</p>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Bar dataKey="score" fill="url(#colorGradient7)" />
+                  <defs>
+                    <linearGradient id="colorGradient7" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#ef4444" />
+                      <stop offset="100%" stopColor="#dc2626" />
+                    </linearGradient>
+                  </defs>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <div className="mt-6 prose prose-zinc dark:prose-invert max-w-none">
+            <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400">
+              These represent the most problematic invoices based on our efficiency formula. The chart shows a clear view of which specific invoices need attention, with detailed metrics available on hover.
+            </p>
+          </div>
+        </NarrativeSection>
         </>
       )}
+      
 
       {/* Story Section 3: What's Next */}
       <NarrativeSection className="border-4 border-cyan-500 dark:border-cyan-600 bg-gradient-to-br from-cyan-50 to-blue-50 dark:from-cyan-950/30 dark:to-blue-950/30">
@@ -581,12 +816,7 @@ export default function DataStory({ data, sessionsData, tables }: DataStoryProps
             Dive Deeper
           </h2>
           <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
-            This is just the beginning. The data holds much more—relationships between providers
-            and participants, error patterns, service utilization trends, and operational insights.
-          </p>
-          <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
-            Ready to explore the raw data? Use the table view to dig into specific records, apply
-            filters, and download data for your own analysis.
+            Look at the data for yourself using the table view:
           </p>
         </div>
       </NarrativeSection>

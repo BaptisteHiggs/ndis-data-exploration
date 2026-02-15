@@ -82,6 +82,76 @@ export default function DataStory({ data, tables }: DataStoryProps) {
       .slice(-12); // Last 12 months
   }, [data]);
 
+  // Distribution of invoices per customer
+  const invoicesPerCustomer = useMemo(() => {
+    if (!data || data.length === 0) return [];
+
+    const participantIdCol = Object.keys(data[0]).find((col) =>
+      col.toLowerCase().includes("participant") && col.toLowerCase().includes("id")
+    );
+
+    if (!participantIdCol) return [];
+
+    // Count invoices per participant
+    const participantCounts: Record<string, number> = {};
+    data.forEach((row) => {
+      if (row[participantIdCol]) {
+        const id = row[participantIdCol];
+        participantCounts[id] = (participantCounts[id] || 0) + 1;
+      }
+    });
+
+    // Create distribution buckets
+    const distribution: Record<string, number> = {};
+    Object.values(participantCounts).forEach((count) => {
+      let bucket = "";
+      if (count === 1) bucket = "1";
+      else if (count === 2) bucket = "2";
+      else if (count <= 5) bucket = "3-5";
+      else if (count <= 10) bucket = "6-10";
+      else bucket = "11+";
+
+      distribution[bucket] = (distribution[bucket] || 0) + 1;
+    });
+
+    const order = ["1", "2", "3-5", "6-10", "11+"];
+    return order
+      .filter((bucket) => distribution[bucket])
+      .map((bucket) => ({ bucket, count: distribution[bucket] }));
+  }, [data]);
+
+  // Distribution of $ per invoice
+  const invoiceValueDistribution = useMemo(() => {
+    if (!data || data.length === 0) return [];
+
+    const numericColumns = Object.keys(data[0]).filter((col) => {
+      const value = data[0][col];
+      return typeof value === "number" && !col.toLowerCase().includes("id");
+    });
+
+    if (numericColumns.length === 0) return [];
+
+    const valueCol = numericColumns[0];
+    const distribution: Record<string, number> = {};
+
+    data.forEach((row) => {
+      const value = row[valueCol] || 0;
+      let bucket = "";
+      if (value < 1000) bucket = "<$1k";
+      else if (value < 5000) bucket = "$1k-$5k";
+      else if (value < 10000) bucket = "$5k-$10k";
+      else if (value < 20000) bucket = "$10k-$20k";
+      else bucket = "$20k+";
+
+      distribution[bucket] = (distribution[bucket] || 0) + 1;
+    });
+
+    const order = ["<$1k", "$1k-$5k", "$5k-$10k", "$10k-$20k", "$20k+"];
+    return order
+      .filter((bucket) => distribution[bucket])
+      .map((bucket) => ({ bucket, count: distribution[bucket] }));
+  }, [data]);
+
   return (
     <div className="space-y-8">
       {/* Introduction */}
@@ -139,6 +209,17 @@ export default function DataStory({ data, tables }: DataStoryProps) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
             <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-8 text-center">
               <p className="text-sm uppercase tracking-wide text-zinc-600 dark:text-zinc-400 mb-2">
+                participants
+              </p>
+              <p className="text-5xl font-bold text-black dark:text-white">
+                {invoiceStats.individualsHelped.toLocaleString()}
+              </p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-2">
+                individuals helped
+              </p>
+            </div>
+            <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-8 text-center">
+              <p className="text-sm uppercase tracking-wide text-zinc-600 dark:text-zinc-400 mb-2">
                 Total Invoices
               </p>
               <p className="text-5xl font-bold text-black dark:text-white">
@@ -159,17 +240,6 @@ export default function DataStory({ data, tables }: DataStoryProps) {
                 in managed funds
               </p>
             </div>
-            <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-8 text-center">
-              <p className="text-sm uppercase tracking-wide text-zinc-600 dark:text-zinc-400 mb-2">
-                participants
-              </p>
-              <p className="text-5xl font-bold text-black dark:text-white">
-                {invoiceStats.individualsHelped.toLocaleString()}
-              </p>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-2">
-                individuals helped
-              </p>
-            </div>
           </div>
         )}
       </NarrativeSection>
@@ -179,47 +249,69 @@ export default function DataStory({ data, tables }: DataStoryProps) {
         <NarrativeSection>
           <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
             <h2 className="text-2xl font-bold text-black dark:text-white mb-4">
-              Activity Over Time
+              All is not equal
             </h2>
             <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
-              Looking at how invoice activity has changed over time reveals patterns in service
-              delivery and plan management operations. The data shows both seasonal variations and
-              overall trends.
+              At first, it may look like there are about 2 invoices per participant, and each invoice is for about $6k. But the data tells a different story:
+
+
             </p>
           </div>
 
-          <div className="mt-8 bg-zinc-50 dark:bg-zinc-800 rounded-lg p-6">
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={monthlyTrend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                <XAxis
-                  dataKey="month"
-                  stroke="#71717a"
-                  style={{ fontSize: "12px" }}
-                />
-                <YAxis stroke="#71717a" />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#18181b",
-                    border: "1px solid #3f3f46",
-                    borderRadius: "0.5rem",
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="count"
-                  stroke="#000000"
-                  strokeWidth={3}
-                  dot={{ fill: "#000000", r: 4 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+          {/* Distribution Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
+            {/* Invoices per Customer Distribution */}
+            {invoicesPerCustomer.length > 0 && (
+              <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-4 text-black dark:text-zinc-50">
+                  Invoices per Participant
+                </h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={invoicesPerCustomer}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
+                    <XAxis dataKey="bucket" stroke="#71717a" />
+                    <YAxis stroke="#71717a" />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#18181b",
+                        border: "1px solid #3f3f46",
+                        borderRadius: "0.5rem",
+                      }}
+                    />
+                    <Bar dataKey="count" fill="#000000" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Invoice Value Distribution */}
+            {invoiceValueDistribution.length > 0 && (
+              <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-4 text-black dark:text-zinc-50">
+                  Invoice Value Distribution
+                </h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={invoiceValueDistribution}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
+                    <XAxis dataKey="bucket" stroke="#71717a" />
+                    <YAxis stroke="#71717a" />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#18181b",
+                        border: "1px solid #3f3f46",
+                        borderRadius: "0.5rem",
+                      }}
+                    />
+                    <Bar dataKey="count" fill="#000000" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
 
           <div className="mt-6 prose prose-zinc dark:prose-invert max-w-none">
             <p className="text-base leading-relaxed text-zinc-600 dark:text-zinc-400">
-              The trend line shows invoice processing activity across months, helping identify peak
-              periods and potential capacity planning needs.
+              text
             </p>
           </div>
         </NarrativeSection>

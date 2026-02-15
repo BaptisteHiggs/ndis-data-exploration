@@ -12,6 +12,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
   const [data, setData] = useState<any[]>([]);
+  const [sessionsData, setSessionsData] = useState<any[]>([]);
   const [tables, setTables] = useState<string[]>([]);
 
   useEffect(() => {
@@ -52,6 +53,7 @@ export default function Home() {
           setError(dataResult.error || "Failed to load dashboard data");
         } else {
           setData(dataResult.data || []);
+          setSessionsData(dataResult.sessionsData || []);
           setTables(tablesResult.tables || []);
         }
       } catch (err) {
@@ -106,7 +108,7 @@ export default function Home() {
         {error && !loading && <ErrorDisplay message={error} />}
 
         {/* Data Story */}
-        {!loading && !error && <DataStory data={data} tables={tables} />}
+        {!loading && !error && <DataStory data={data} sessionsData={sessionsData} tables={tables} />}
       </div>
     </div>
   );

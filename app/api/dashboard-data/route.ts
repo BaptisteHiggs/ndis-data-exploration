@@ -28,21 +28,35 @@ export async function POST(request: NextRequest) {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Fetch data from ndis_invoices for dashboard
-    const { data, error } = await supabase
+    const { data: invoicesData, error: invoicesError } = await supabase
       .from("ndis_invoices")
       .select("*")
       .limit(1000); // Limit for performance
 
-    if (error) {
+    if (invoicesError) {
       return NextResponse.json(
-        { error: `Failed to fetch dashboard data: ${error.message}` },
+        { error: `Failed to fetch invoices data: ${invoicesError.message}` },
+        { status: 500 }
+      );
+    }
+
+    // Fetch data from invoice_view_sessions for duration analysis
+    const { data: sessionsData, error: sessionsError } = await supabase
+      .from("invoice_view_sessions")
+      .select("*")
+      .limit(1000); // Limit for performance
+
+    if (sessionsError) {
+      return NextResponse.json(
+        { error: `Failed to fetch sessions data: ${sessionsError.message}` },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
-      data: data || [],
-      rowCount: data?.length || 0,
+      data: invoicesData || [],
+      sessionsData: sessionsData || [],
+      rowCount: invoicesData?.length || 0,
     });
   } catch (error) {
     return NextResponse.json(

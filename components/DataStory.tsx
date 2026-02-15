@@ -16,10 +16,11 @@ import NarrativeSection from "./NarrativeSection";
 
 interface DataStoryProps {
   data: any[];
+  sessionsData: any[];
   tables: string[];
 }
 
-export default function DataStory({ data, tables }: DataStoryProps) {
+export default function DataStory({ data, sessionsData, tables }: DataStoryProps) {
   // Sample aggregations for storytelling
   const invoiceStats = useMemo(() => {
     if (!data || data.length === 0) return null;
@@ -151,6 +152,91 @@ export default function DataStory({ data, tables }: DataStoryProps) {
       .filter((bucket) => distribution[bucket])
       .map((bucket) => ({ bucket, count: distribution[bucket] }));
   }, [data]);
+
+  // Helper function to create time-based distribution
+  const createTimeDistribution = (data: any[], columnName: string) => {
+    const order = ["0-30s", "30-60s", "1-5m", "5-10m", "10-30m", "30m+"];
+
+    if (!data || data.length === 0) {
+      // Return all buckets with 0 count to maintain consistency
+      return order.map((bucket) => ({ bucket, count: 0 }));
+    }
+
+    const distribution: Record<string, number> = {};
+
+    // Initialize all buckets with 0
+    order.forEach((bucket) => {
+      distribution[bucket] = 0;
+    });
+
+    data.forEach((row) => {
+      const seconds = row[columnName] || 0;
+      let bucket = "";
+      if (seconds < 30) bucket = "0-30s";
+      else if (seconds < 60) bucket = "30-60s";
+      else if (seconds < 300) bucket = "1-5m";
+      else if (seconds < 600) bucket = "5-10m";
+      else if (seconds < 1800) bucket = "10-30m";
+      else bucket = "30m+";
+
+      distribution[bucket] = (distribution[bucket] || 0) + 1;
+    });
+
+    // Return all buckets in order, even if count is 0
+    return order.map((bucket) => ({ bucket, count: distribution[bucket] }));
+  };
+
+  // Duration distributions from invoice_view_sessions
+  const durationDistribution = useMemo(() => {
+    return createTimeDistribution(sessionsData, "duration_seconds");
+  }, [sessionsData]);
+
+  const activeDurationDistribution = useMemo(() => {
+    return createTimeDistribution(sessionsData, "active_duration_seconds");
+  }, [sessionsData]);
+
+  const engagedDurationDistribution = useMemo(() => {
+    return createTimeDistribution(sessionsData, "engaged_duration_seconds");
+  }, [sessionsData]);
+
+  // Sessions per invoice distribution
+  const sessionsPerInvoice = useMemo(() => {
+    if (!sessionsData || sessionsData.length === 0) return [];
+
+    // Find the invoice ID column
+    const invoiceIdCol = Object.keys(sessionsData[0]).find((col) =>
+      col.toLowerCase().includes("invoice") && col.toLowerCase().includes("id")
+    );
+
+    if (!invoiceIdCol) return [];
+
+    // Count sessions per invoice
+    const sessionCounts: Record<string, number> = {};
+    sessionsData.forEach((row) => {
+      if (row[invoiceIdCol]) {
+        const id = row[invoiceIdCol];
+        sessionCounts[id] = (sessionCounts[id] || 0) + 1;
+      }
+    });
+
+    // Create distribution buckets
+    const distribution: Record<string, number> = {};
+    Object.values(sessionCounts).forEach((count) => {
+      let bucket = "";
+      if (count === 1) bucket = "1";
+      else if (count === 2) bucket = "2";
+      else if (count <= 5) bucket = "3-5";
+      else if (count <= 10) bucket = "6-10";
+      else bucket = "11+";
+
+      distribution[bucket] = (distribution[bucket] || 0) + 1;
+    });
+
+    const order = ["1", "2", "3-5", "6-10", "11+"];
+    return order
+      .filter((bucket) => distribution[bucket])
+      .map((bucket) => ({ bucket, count: distribution[bucket] }));
+  }, [sessionsData]);
 
   return (
     <div className="space-y-8">
@@ -333,20 +419,157 @@ export default function DataStory({ data, tables }: DataStoryProps) {
         <NarrativeSection>
           <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
             <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
-              Invoices
+              Invoice Management
             </h2>
             <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
               The same is true for invoice management:
             </p>
           </div>
 
-            {/*  */}
+          {/* Duration Distribution Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
+            {/* Total Duration Distribution */}
+            {durationDistribution.length > 0 && (
+              <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-cyan-200 dark:border-cyan-900/50 rounded-lg p-6 shadow-lg">
+                <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent">
+                  Total Session Duration
+                </h3>
+                <ResponsiveContainer width="100%" height={340}>
+                  <BarChart data={durationDistribution} margin={{ top: 5, right: 5, bottom: 50, left: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#22d3ee" opacity={0.1} />
+                    <XAxis dataKey="bucket" stroke="#06b6d4" angle={-45} textAnchor="end" height={20} tick={{ dy: 16 }} />
+                    <YAxis stroke="#06b6d4" />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#0e7490",
+                        border: "2px solid #06b6d4",
+                        borderRadius: "0.5rem",
+                        color: "#fff",
+                      }}
+                    />
+                    <Bar dataKey="count" fill="url(#colorGradient3)" />
+                    <defs>
+                      <linearGradient id="colorGradient3" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#06b6d4" />
+                        <stop offset="100%" stopColor="#0891b2" />
+                      </linearGradient>
+                    </defs>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Active Duration Distribution */}
+            {activeDurationDistribution.length > 0 && (
+              <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-blue-200 dark:border-blue-900/50 rounded-lg p-6 shadow-lg">
+                <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">
+                  Active Duration
+                </h3>
+                <ResponsiveContainer width="100%" height={340}>
+                  <BarChart data={activeDurationDistribution} margin={{ top: 5, right: 5, bottom: 20, left: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#3b82f6" opacity={0.1} />
+                    <XAxis dataKey="bucket" stroke="#2563eb" angle={-45} textAnchor="end" height={50} tick={{ dy: 16 }} />
+                    <YAxis stroke="#2563eb" />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#1e40af",
+                        border: "2px solid #2563eb",
+                        borderRadius: "0.5rem",
+                        color: "#fff",
+                      }}
+                    />
+                    <Bar dataKey="count" fill="url(#colorGradient4)" />
+                    <defs>
+                      <linearGradient id="colorGradient4" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#3b82f6" />
+                        <stop offset="100%" stopColor="#2563eb" />
+                      </linearGradient>
+                    </defs>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Engaged Duration Distribution */}
+            {engagedDurationDistribution.length > 0 && (
+              <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-indigo-200 dark:border-indigo-900/50 rounded-lg p-6 shadow-lg">
+                <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">
+                  Engaged Duration
+                </h3>
+                <ResponsiveContainer width="100%" height={340}>
+                  <BarChart data={engagedDurationDistribution} margin={{ top: 5, right: 5, bottom: 20, left: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#6366f1" opacity={0.1} />
+                    <XAxis dataKey="bucket" stroke="#4f46e5" angle={-45} textAnchor="end" height={50} tick={{ dy: 16 }} />
+                    <YAxis stroke="#4f46e5" />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#4338ca",
+                        border: "2px solid #4f46e5",
+                        borderRadius: "0.5rem",
+                        color: "#fff",
+                      }}
+                    />
+                    <Bar dataKey="count" fill="url(#colorGradient5)" />
+                    <defs>
+                      <linearGradient id="colorGradient5" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#6366f1" />
+                        <stop offset="100%" stopColor="#4f46e5" />
+                      </linearGradient>
+                    </defs>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
 
           <div className="mt-6 prose prose-zinc dark:prose-invert max-w-none">
             <p className="text-base leading-relaxed text-slate-600 dark:text-slate-400">
-              Most invoices are small (under $300), and most participants only have 1 invoice. But there are some big outliers—participants with many invoices, and some very high-value invoices.
+              Most invoices take less than 5 minutes. But some take upwards of half an hour (although this is likely due to people leaving sessions open while doing something else).
             </p>
           </div>
+        </NarrativeSection>
+
+        {/* Sessions per Invoice Section */}
+        <NarrativeSection>
+          <div className="prose prose-zinc dark:prose-invert max-w-none mb-6">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent mb-4">
+              Multiple Sessions
+            </h2>
+            <p className="text-lg leading-relaxed text-slate-700 dark:text-slate-300">
+              Most invoices are viewed just once. But some require coming back multiple times:
+            </p>
+          </div>
+
+          {/* Sessions per Invoice Chart */}
+          {sessionsPerInvoice.length > 0 && (
+            <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-2 border-purple-200 dark:border-purple-900/50 rounded-lg p-6 shadow-lg">
+              <h3 className="text-lg font-semibold mb-4 bg-gradient-to-r from-purple-600 to-pink-600 dark:from-purple-400 dark:to-pink-400 bg-clip-text text-transparent">
+                Sessions per Invoice
+              </h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={sessionsPerInvoice}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#a855f7" opacity={0.1} />
+                  <XAxis dataKey="bucket" stroke="#9333ea" />
+                  <YAxis stroke="#9333ea" />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#7e22ce",
+                      border: "2px solid #9333ea",
+                      borderRadius: "0.5rem",
+                      color: "#fff",
+                    }}
+                  />
+                  <Bar dataKey="count" fill="url(#colorGradient6)" />
+                  <defs>
+                    <linearGradient id="colorGradient6" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#a855f7" />
+                      <stop offset="100%" stopColor="#9333ea" />
+                    </linearGradient>
+                  </defs>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </NarrativeSection>
         </>
       )}
